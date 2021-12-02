@@ -313,7 +313,7 @@ def print_model_performance(perf):
 def main():
 	# get data from file
 	os.chdir('data')
-	stock_ticker = 'BDOUY'
+	stock_ticker = 'AP'
 	raw_data = pd.read_csv(f'{stock_ticker}.csv')
 
 	# preprocess data (i.e. calculate returns)

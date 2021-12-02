@@ -1,1 +1,7 @@
 # stock-direction-forecasting
+
+## Philippine Stock Direction Forecasting Utilizing Technical, Fundamental, and News Sentiment Data
+
+### Abstract
+
+Throughout history, stock trading has been one of the most lucrative investment instruments, capable of providing investors returns above inflation rates and outperforming bank interest rates. However, predicting the direction of stock price movements is a complex process and requires careful analysis of recent and past information. Many studies in recent years have implemented various machine and deep learning models in order to forecast stock directions with varying levels of success. In this capstone project, the proponents will create long short-term memory (LSTM) neural network models that utilize a combination of technical, fundamental, and news sentiment stock data. Said models will be capable of forecasting the future daily directions of the closing prices of individual stocks being traded in the Philippine Stock Exchange (PSE) with sufficient accuracy. The final output of this capstone project will be a computer user application that investors can use to automatically generate their own LSTM models for inputted prospective stocks and receive stock direction forecasts that may be used in the decision-making for stock trading.
