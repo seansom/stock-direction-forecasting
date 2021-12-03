@@ -1,9 +1,28 @@
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
+from keras.callbacks import Callback
+from statistics import mean
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import os, sys
+
+
+class CustomCallback(Callback):
+	"""A callback class used to print the progress of model fitting
+	after each epoch.
+	"""	
+	def __init__(self, epochs):
+		self.epochs = epochs
+
+	def on_epoch_end(self, epoch, logs=None):
+		curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
+		print(f'Training Progress: {curr_progress} %', end='\r')
+
+		if curr_progress == 100:
+			print()
+
+
 
 
 def preprocess_data(data):
@@ -173,13 +192,13 @@ def make_data_window(train, test, time_steps=1):
 
 		if (i + time_steps) < train_len:
 			train_x.append([train[j, :] for j in range(i, i + time_steps)])
-			train_y.append(train[i + time_steps, stock_returns_index])
+			train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
 			
 	for i in range(test_len):
 		
 		if (i + time_steps) < test_len:
 			test_x.append([test[j, :] for j in range(i, i + time_steps)])
-			test_y.append(test[i + time_steps, stock_returns_index])
+			test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
 
 
 	train_x = np.array(train_x)
@@ -208,13 +227,17 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
 
 	# The LSTM model to be used
 	lstm_model = Sequential([
-		LSTM(units=32, input_shape=train_x.shape[1:]),
-		Dropout(0.8),
+		LSTM(units=32, input_shape=train_x.shape[1:], return_sequences=True),
+		Dropout(0.6),
+		LSTM(units=32, input_shape=train_x.shape[1:], return_sequences=True),
+		Dropout(0.6),
+		LSTM(units=32, input_shape=train_x.shape[1:], return_sequences=True),
+		Dropout(0.6),
 		Dense(units=1, activation="linear")
 	])
 
 	lstm_model.compile(loss="mean_squared_error", optimizer="adam")
-	lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size)
+	lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, verbose=0, callbacks=[CustomCallback(epochs)])
 
 	return lstm_model
 
@@ -239,10 +262,14 @@ def forecast_lstm_model(model, test_x):
 
 	# Make a separate prediction for each test data window in the test dataset
 	for i in range(test_len):
-		print(f'Prediction Progress: {round(((i + 1) / test_len) * 100, 2)} %', end='\r')
+		curr_progress =round(((i + 1) / test_len) * 100, 2)
+		print(f'Prediction Progress: {curr_progress} %', end='\r')
+
 		model_input = (test_x[i, :, :]).reshape(1, test_timesteps, test_features)
 		prediction = model.predict(model_input)
-		predictions.append(prediction)
+		# the prediction has a shape of (1, timesteps, 1)
+		# only need to get the last prediction value
+		predictions.append(prediction[0, -1, 0])
 	print()
 
 	predictions = (np.array(predictions)).flatten()
@@ -310,10 +337,9 @@ def print_model_performance(perf):
 
 
 
-def main():
+def experiment(stock_ticker, time_steps, epochs, batch_size):	
+
 	# get data from file
-	os.chdir('data')
-	stock_ticker = 'AP'
 	raw_data = pd.read_csv(f'{stock_ticker}.csv')
 
 	# preprocess data (i.e. calculate returns)
@@ -324,13 +350,16 @@ def main():
 	scaler, train, test = scale_data(train, test)
 
 	# get data slices or windows
-	train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=1)
+	train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=time_steps)
 
 	# create, compile, and fit an lstm model
-	lstm_model = make_lstm_model(train_x, train_y, epochs=500, batch_size=32)
+	lstm_model = make_lstm_model(train_x, train_y, epochs=epochs, batch_size=batch_size)
 
 	# get the model predictions
 	predictions = forecast_lstm_model(lstm_model, test_x)
+
+	# test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
+	test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
 
 	# revert the normalization scalings done
 	test_y = invert_scaled_data(test_y, scaler, feature="Stock Returns")
@@ -339,8 +368,42 @@ def main():
 	# get model performance statistics
 	perf = get_lstm_model_perf(predictions, test_y)
 
-	# print out the performance statistics
-	print_model_performance(perf)
+	return perf
+
+
+
+def main():
+	os.chdir('data')
+
+	# stock to be predicted
+	stock_ticker = 'BDOUY'
+
+	# parameters of each model
+	time_steps = 1
+	epochs = 100
+	batch_size = 32
+
+	# how many models built
+	repeats = 5
+	
+	print("====================================================================")
+	performances = []
+
+	for i in range(repeats):
+		print(f"Experiment {i + 1} / {repeats}")
+		perf = experiment(stock_ticker, time_steps, epochs, batch_size)
+		performances.append(perf)
+		print("====================================================================")
+
+	mean_da = mean([perf['da'] for perf in performances])
+	mean_uda = mean([perf['uda'] for perf in performances])
+	mean_dda = mean([perf['dda'] for perf in performances])
+	
+	# Print average accuracies of the built models
+	print(f"Mean DA: {round(mean_da, 6)}")
+	print(f"Mean UDA: {round(mean_uda, 6)}")
+	print(f"Mean DDA: {round(mean_dda, 6)}")
+
 
 
 
