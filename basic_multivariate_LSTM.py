@@ -1,7 +1,8 @@
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from keras.callbacks import Callback
-from statistics import mean
+#from tensorflow.keras.optimizers import Adam
+from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -236,7 +237,7 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
 		Dense(units=1, activation="linear")
 	])
 
-	lstm_model.compile(loss="mean_squared_error", optimizer="adam")
+	lstm_model.compile(loss="mean_squared_error", optimizer='adam')
 	lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, verbose=0, callbacks=[CustomCallback(epochs)])
 
 	return lstm_model
@@ -380,7 +381,7 @@ def main():
 
 	# parameters of each model
 	time_steps = 1
-	epochs = 100
+	epochs = 25
 	batch_size = 32
 
 	# how many models built
@@ -398,11 +399,21 @@ def main():
 	mean_da = mean([perf['da'] for perf in performances])
 	mean_uda = mean([perf['uda'] for perf in performances])
 	mean_dda = mean([perf['dda'] for perf in performances])
+
+	std_da = stdev([perf['da'] for perf in performances])
+	std_uda = stdev([perf['uda'] for perf in performances])
+	std_dda = stdev([perf['dda'] for perf in performances])
 	
 	# Print average accuracies of the built models
 	print(f"Mean DA: {round(mean_da, 6)}")
 	print(f"Mean UDA: {round(mean_uda, 6)}")
 	print(f"Mean DDA: {round(mean_dda, 6)}")
+
+	print()
+
+	print(f"Standard Dev. DA: {round(std_da, 6)}")
+	print(f"Standard Dev. UDA: {round(std_uda, 6)}")
+	print(f"Standard Dev. DDA: {round(std_dda, 6)}")
 
 
 
