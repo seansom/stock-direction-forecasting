@@ -1,6 +1,6 @@
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
-from keras.callbacks import Callback
+from keras.callbacks import Callback, EarlyStopping
 #from tensorflow.keras.optimizers import Adam
 from statistics import mean, stdev
 import numpy as np
@@ -20,9 +20,6 @@ class CustomCallback(Callback):
 		curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
 		print(f'Training Progress: {curr_progress} %', end='\r')
 
-		if curr_progress == 100:
-			print()
-
 
 
 
@@ -35,7 +32,7 @@ def preprocess_data(data):
 
 	Returns:
 		DataFrame: The processed dataset.
-	"""	
+	""" 
 	# get closing prices from data
 	try:
 		close = data['Adj Close']
@@ -220,7 +217,7 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
 		train_x (np.array): The model inputs for training.
 		train_y (np.array): The model target outputs for training.
 		epochs (int, optional): Number of times the model is fitted. Defaults to 100.
-		batch_size (int, optional): Number of samples processed befire model is updated. Defaults to 32.
+		batch_size (int, optional): Number of samples processed before model is updated. Defaults to 32.
 
 	Returns:
 		Model: The built Keras LSTM model.
@@ -237,8 +234,11 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
 		Dense(units=1, activation="linear")
 	])
 
-	lstm_model.compile(loss="mean_squared_error", optimizer='adam')
-	lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, verbose=0, callbacks=[CustomCallback(epochs)])
+	early_stopping_callback = EarlyStopping(monitor='val_loss', patience=3, mode='min')
+	print_train_progress_callback = CustomCallback(epochs)
+
+	lstm_model.compile(loss="mean_squared_error", optimizer='adam', metrics=['mean_absolute_error'])
+	lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
 	return lstm_model
 
@@ -262,6 +262,7 @@ def forecast_lstm_model(model, test_x):
 	test_features = test_x.shape[2]
 
 	# Make a separate prediction for each test data window in the test dataset
+	print()
 	for i in range(test_len):
 		curr_progress =round(((i + 1) / test_len) * 100, 2)
 		print(f'Prediction Progress: {curr_progress} %', end='\r')
@@ -377,14 +378,14 @@ def main():
 	os.chdir('data')
 
 	# stock to be predicted
-	stock_ticker = 'BDOUY'
+	stock_ticker = 'AP'
 
 	# parameters of each model
 	time_steps = 1
-	epochs = 25
+	epochs = 100
 	batch_size = 32
 
-	# how many models built
+	# how many models built (min = 2)
 	repeats = 5
 	
 	print("====================================================================")
