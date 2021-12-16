@@ -66,6 +66,7 @@ def train_test_split(data):
 	Returns:
 		DataFrame, DataFrame: The train and test datasets.
 	"""	
+
 	test_len = len(data) * 2 // 10
 	train, test = data[:-test_len], data[-test_len:]
 	return train, test
@@ -216,7 +217,7 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
 	# set hyperparameters to be searched in Hyperband tuning
 	units = hp.Choice('units', values=[32, 64, 128, 256]) 
-	layers = hp.Int('layers', min_value=1, max_value=5, step=1)
+	layers = hp.Int('layers', min_value=1, max_value=4, step=1)
 	dropout = hp.Float('dropout', min_value=0.0, max_value=0.9, step=0.1)
 	
 	# create lstm hypermodel
@@ -243,7 +244,7 @@ def get_optimal_hps(train_x, train_y):
 	hypermodel_builder = lambda hp : make_lstm_hypermodel(hp, time_steps, features)
 
 	# if overwrite is false, previously-saved computed hps will be used
-	tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=6, overwrite=True)
+	tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
 	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
 	# execute Huperband search of optimal hyperparameters
@@ -401,8 +402,11 @@ def experiment(stock_ticker, time_steps, repeats=2):
 	# determine optimal hyperparameters using Hyperband tuning
 	hps = get_optimal_hps(train_x, train_y)
 
+	print("====================================================================")
+	print(f'Optimal hyperparameters found: {hps}')
+
 	# sample hps
-	# hps = {'units':64, 'layers':3, 'dropout':0.3}
+	# hps = {'units':256, 'layers':5, 'dropout':0.4}
 
 	# Make multiple models using optimal hyperparameters to determine average performance
 	performances = []
@@ -435,7 +439,7 @@ def main():
 	os.chdir('data')
 
 	# stock to be predicted
-	stock_ticker = 'AP'
+	stock_ticker = 'ALI'
 	# parameters of each model
 	time_steps = 1
 	# how many models built (min = 2)
