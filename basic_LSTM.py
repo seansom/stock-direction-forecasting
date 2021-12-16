@@ -1,14 +1,11 @@
-from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout
-from keras.callbacks import Callback, EarlyStopping
+from tensorflow import keras
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 import os, sys
 
 
-class CustomCallback(Callback):
+class CustomCallback(keras.callbacks.Callback):
 	"""A callback class used to print the progress of model fitting
 	after each epoch.
 	"""	
@@ -223,17 +220,17 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
 	"""	
 
 	# The LSTM model to be used
-	lstm_model = Sequential([
-		LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-		LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-		LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-		Dense(units=1, activation="linear")
+	lstm_model = keras.models.Sequential([
+		keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
+		keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
+		keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
+		keras.layers.Dense(units=1, activation="linear")
 	])
 
-	early_stopping_callback = EarlyStopping(monitor='val_loss', patience=3, mode='min')
+	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 	print_train_progress_callback = CustomCallback(epochs)
 
-	lstm_model.compile(loss='mean_squared_error', optimizer='adam', metrics=['mean_squared_error'])
+	lstm_model.compile(loss='mean_squared_error', optimizer='adam')
 	lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
 	return lstm_model

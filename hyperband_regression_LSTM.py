@@ -247,7 +247,7 @@ def get_optimal_hps(train_x, train_y):
 	tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
 	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
-	# execute Huperband search of optimal hyperparameters
+	# execute Hyperband search of optimal hyperparameters
 	tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
 	
 	# hps is a dictionary of optimal hyperparameter levels
@@ -439,7 +439,7 @@ def main():
 	os.chdir('data')
 
 	# stock to be predicted
-	stock_ticker = 'ALI'
+	stock_ticker = 'AP'
 	# parameters of each model
 	time_steps = 1
 	# how many models built (min = 2)
