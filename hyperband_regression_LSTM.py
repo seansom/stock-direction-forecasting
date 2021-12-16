@@ -3,7 +3,7 @@ import keras_tuner as kt
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys
+import os, sys, shutil
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -215,7 +215,7 @@ def make_lstm_hypermodel(hp, time_steps, features):
 	lstm_hypermodel = keras.models.Sequential()
 
 	# set hyperparameters to be searched in Hyperband tuning
-	units = hp.Int('units', min_value=32, max_value=256, step=32)
+	units = hp.Choice('units', values=[32, 64, 128, 256]) 
 	layers = hp.Int('layers', min_value=1, max_value=5, step=1)
 	dropout = hp.Float('dropout', min_value=0.0, max_value=0.9, step=0.1)
 	
@@ -230,7 +230,11 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
 
 
-def get_optimal_hps(train_x, train_y, overwrite=True):
+def get_optimal_hps(train_x, train_y):
+
+	# the tuner saves files to the current working directory, delete old files if any
+	if os.path.exists('untitled_project'):
+		shutil.rmtree('untitled_project')
 
 	time_steps = train_x.shape[1]
 	features = train_x.shape[2]
@@ -238,16 +242,19 @@ def get_optimal_hps(train_x, train_y, overwrite=True):
 	# create a wrapper for the hypermodel builder to account for different input shapes
 	hypermodel_builder = lambda hp : make_lstm_hypermodel(hp, time_steps, features)
 
-	# if overwrite is false, previously computed hps will be used
-	tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=overwrite)
+	# if overwrite is false, previously-saved computed hps will be used
+	tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=6, overwrite=True)
 	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
 	# execute Huperband search of optimal hyperparameters
 	tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
-
+	
 	# hps is a dictionary of optimal hyperparameter levels
 	hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
 
+	# delete files saved by tuner in current working directory
+	shutil.rmtree('untitled_project')
+	
 	return hps
 
 
@@ -376,7 +383,7 @@ def print_model_performance(perf):
 
 
 
-def experiment(stock_ticker, time_steps, repeats=2, overwrite=True):	
+def experiment(stock_ticker, time_steps, repeats=2):	
 
 	# get data from file
 	raw_data = pd.read_csv(f'{stock_ticker}.csv')
@@ -392,8 +399,7 @@ def experiment(stock_ticker, time_steps, repeats=2, overwrite=True):
 	train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=time_steps)
 
 	# determine optimal hyperparameters using Hyperband tuning
-	# if overwrite is false, previously computed hps will be used
-	hps = get_optimal_hps(train_x, train_y, overwrite=overwrite)
+	hps = get_optimal_hps(train_x, train_y)
 
 	# sample hps
 	# hps = {'units':64, 'layers':3, 'dropout':0.3}
@@ -435,8 +441,7 @@ def main():
 	# how many models built (min = 2)
 	repeats = 10
 
-	# if overwrite is false, previously computed hps for the models will be used
-	performances = experiment(stock_ticker, time_steps, repeats, overwrite=True)
+	performances = experiment(stock_ticker, time_steps, repeats)
 
 	mean_da = mean([perf['da'] for perf in performances])
 	mean_uda = mean([perf['uda'] for perf in performances])
