@@ -3,7 +3,7 @@ import keras_tuner as kt
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys
+import os, sys, shutil
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -213,6 +213,10 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
 def get_optimal_hps(train_x, train_y, overwrite=True):
 
+	# the tuner saves files to the current working directory, delete old files if any
+	if os.path.exists('untitled_project'):
+		shutil.rmtree('untitled_project')
+
 	time_steps = train_x.shape[1]
 	features = train_x.shape[2]
 
@@ -221,13 +225,16 @@ def get_optimal_hps(train_x, train_y, overwrite=True):
 
 	# if overwrite is false, previously computed hps will be used
 	tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=overwrite)
-	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='max')
+	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
 	# execute Huperband search of optimal hyperparameters
 	tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
 
 	# hps is a dictionary of optimal hyperparameter levels
 	hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
+
+	# delete files saved by tuner in current working directory
+	shutil.rmtree('untitled_project')
 
 	return hps
 
@@ -252,7 +259,7 @@ def make_lstm_model(train_x, train_y, hps):
 	lstm_model.add(keras.layers.Dense(units=1, activation="sigmoid"))
 
 	# initialize callbacks used for early stopping and printing training progress to terminal
-	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='max')
+	early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 	print_train_progress_callback = CustomCallback(epochs=100)
 
 	# compile and fit the model
