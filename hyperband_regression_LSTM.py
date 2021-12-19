@@ -217,7 +217,7 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
 	# set hyperparameters to be searched in Hyperband tuning
 	units = hp.Choice('units', values=[32, 64, 128, 256]) 
-	layers = hp.Int('layers', min_value=1, max_value=4, step=1)
+	layers = hp.Int('layers', min_value=1, max_value=5, step=1)
 	dropout = hp.Float('dropout', min_value=0.0, max_value=0.9, step=0.1)
 	
 	# create lstm hypermodel
