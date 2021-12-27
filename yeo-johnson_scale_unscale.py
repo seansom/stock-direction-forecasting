@@ -112,7 +112,7 @@ def unscale_data(to_unscale, data):
     col_names = list(to_unscale.columns)
     to_unscale = to_unscale.to_numpy()
     data = data.to_numpy()
-    #get lambdas from original data set
+    #get lambdas from original train data set
     pt.fit(data)
     to_unscale = pt.inverse_transform(to_unscale)
     to_unscale = pd.DataFrame({col: to_unscale[:, i] for i, col in enumerate(col_names)})
