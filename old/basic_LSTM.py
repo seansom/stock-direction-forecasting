@@ -3,7 +3,6 @@ from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import os, sys, math
-from sklearn.preprocessing import PowerTransformer
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -39,19 +38,13 @@ def preprocess_data(data):
     # convert closing prices to stock returns
     stock_returns = []
     for i in range(1, len(data)):
-        stock_return = math.log(close[i] / close[i - 1], 10)
+        stock_return = ((close[i] - close[i - 1]) / close[i - 1]) * 100
         stock_returns.append(stock_return)
-
-
-    volume = data['Volume']
-    volumes = []
-    for i in range(1, len(data)):
-        volumes.append(volume[i] / 1000)
 
     # convert to dataframe
     processed_data = pd.DataFrame({
         'Stock Returns': stock_returns,
-        'Volume': volumes
+        'Volume': data['Volume'][1:]
     })
 
     return processed_data
@@ -77,24 +70,40 @@ def train_test_split(data):
 
 
 def scale_data(train, test):
-    """Applies Yeo-Johnson transformation to train and test datasets. 
-    Each column or feature in the dataset is standardized separately.
+    """Applies standardization or Z-score normalization of the train 
+    and test datasets. Each column or feature in the dataset is
+    standardized separately.
+
     Args:
         train (DataFrame): The test dataset.
         test (DataFrame): The train dataset.
+
     Returns:
-        Yeo-Johnson transformed train and test datasets.
-    """
+        dict, DataFrame, DataFrame: The scaler which contains the
+        means and standard deviations of each feature column, and the 
+        scaled train and test datasets.
+    """	
     # store column names
     col_names = list(train.columns)
     col_num = train.shape[1]
 
+    # convert dataframes into numpy arrays
+    train = train.to_numpy()
+    test = test.to_numpy()
+
+    # get means and standard deviations
+    train_means = [train[:, i].mean() for i in range(col_num)]
+    train_stds = [train[:, i].std() for i in range(col_num)]
+    scaler = {col_names[i]:{"mean":train_means[i], "std":train_stds[i]} for i in range(col_num)}
+
     # scale data for train & test data
-    scaler = PowerTransformer()
-    
-    # Apply Yeo-Johnson Transform
-    train = scaler.fit_transform(train)
-    test = scaler.transform(test)
+    for row in range(train.shape[0]):
+        for col in range(col_num):
+            train[row, col] = (train[row, col] - train_means[col]) / train_stds[col]
+
+    for row in range(test.shape[0]):
+        for col in range(col_num):
+            test[row, col] = (test[row, col] - train_means[col]) / train_stds[col]
 
     # scale down outliers in train and test data
     for row in range(train.shape[0]):
@@ -114,18 +123,27 @@ def scale_data(train, test):
     # reconvert to dataframes
     train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
     test = pd.DataFrame({col: test[:, i] for i, col in enumerate(col_names)})
-
-    return scaler, train, test, col_names
-
-
+    
+    return scaler, train, test
 
 
-def invert_scaled_data(data, scaler, col_names, feature="Stock Returns"):
-    unscaled_data = pd.DataFrame(np.zeros((len(data), len(col_names))), columns=col_names)
-    unscaled_data[feature] = data
-    unscaled_data = pd.DataFrame(scaler.inverse_transform(unscaled_data), columns=col_names)
 
-    return unscaled_data[feature].values
+
+def invert_scaled_data(data, scaler, feature="Stock Returns"):
+    """Reverts the scaling done to a dataset.
+
+    Args:
+        data (np.array): The single-feature dataset represented as a numpy array.
+        scaler (dict): The scaler dictionary which holds the means
+        and standard deviations for each feature column.
+        feature (str, optional): The specific feature to be unscaled. 
+        Defaults to "Stock Returns".
+
+    Returns:
+        np.array: The reverted dataset.
+    """	
+    unscaled_data = data * scaler[feature]["std"] + scaler[feature]["mean"]
+    return unscaled_data
 
 
 
@@ -205,7 +223,7 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
     lstm_model = keras.models.Sequential([
         keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
         keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
+        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
         keras.layers.Dense(units=1, activation="linear")
     ])
 
@@ -239,7 +257,7 @@ def forecast_lstm_model(model, test_x):
     # Make a separate prediction for each test data window in the test dataset
     print()
     for i in range(test_len):
-        curr_progress = round(((i + 1) / test_len) * 100, 2)
+        curr_progress =round(((i + 1) / test_len) * 100, 2)
         print(f'Prediction Progress: {curr_progress} %', end='\r')
 
         model_input = (test_x[i, :, :]).reshape(1, test_timesteps, test_features)
@@ -324,7 +342,7 @@ def experiment(stock_ticker, time_steps, epochs, batch_size):
 
     # split and scale data
     train, test = train_test_split(data)
-    scaler, train, test, col_names = scale_data(train, test)
+    scaler, train, test = scale_data(train, test)
 
     # get data slices or windows
     train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=time_steps)
@@ -339,8 +357,8 @@ def experiment(stock_ticker, time_steps, epochs, batch_size):
     test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
 
     # revert the normalization scalings done
-    test_y = invert_scaled_data(test_y, scaler, col_names, feature="Stock Returns")
-    predictions = invert_scaled_data(predictions, scaler, col_names, feature="Stock Returns")
+    test_y = invert_scaled_data(test_y, scaler, feature="Stock Returns")
+    predictions = invert_scaled_data(predictions, scaler, feature="Stock Returns")
 
     # get model performance statistics
     perf = get_lstm_model_perf(predictions, test_y)
@@ -380,8 +398,6 @@ def main():
     std_uda = stdev([perf['uda'] for perf in performances])
     std_dda = stdev([perf['dda'] for perf in performances])
 
-    print(performances[0]['total_ups'], performances[0]['total_downs'])
-    
     optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
     pessimistic_baseline = 1 - optimistic_baseline
     
@@ -407,6 +423,7 @@ def main():
     print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
 
 
+        
 
 
 if __name__ == '__main__':

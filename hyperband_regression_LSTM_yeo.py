@@ -1,8 +1,9 @@
 from tensorflow import keras
+import keras_tuner as kt
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys, math
+import os, sys, shutil, math
 from sklearn.preprocessing import PowerTransformer, StandardScaler
 
 
@@ -16,6 +17,9 @@ class CustomCallback(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
         print(f'Training Progress: {curr_progress} %', end='\r')
+
+    def on_train_end(self, logs=None):
+        print()
 
 
 
@@ -40,9 +44,7 @@ def preprocess_data(data):
     stock_returns = []
     for i in range(1, len(data)):
         stock_return = math.log(close[i] / close[i - 1])
-        # stock_return = ((close[i] - close[i - 1]) / close[i - 1]) * 100
         stock_returns.append(stock_return)
-
 
     volume = data['Volume']
     volumes = []
@@ -70,6 +72,7 @@ def train_test_split(data):
     Returns:
         DataFrame, DataFrame: The train and test datasets.
     """	
+
     test_len = len(data) * 2 // 10
     train, test = data[:-test_len], data[-test_len:]
     return train, test
@@ -189,33 +192,81 @@ def make_data_window(train, test, time_steps=1):
 
 
 
-def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
-    """Builds, compiles, fits, and returns an LSTM model based on
-    provided training inputs and targets, as well as epochs and batch size.
+def make_lstm_hypermodel(hp, time_steps, features):
 
-    Args:
-        train_x (np.array): The model inputs for training.
-        train_y (np.array): The model target outputs for training.
-        epochs (int, optional): Number of times the model is fitted. Defaults to 100.
-        batch_size (int, optional): Number of samples processed before model is updated. Defaults to 32.
+    # a hypermodel has keras tuner hyperparameters (hp) that are variable
+    lstm_hypermodel = keras.models.Sequential()
 
-    Returns:
-        Model: The built Keras LSTM model.
-    """	
+    # set hyperparameters to be searched in Hyperband tuning
+    units = hp.Choice('units', values=[32, 64, 128, 256]) 
+    layers = hp.Int('layers', min_value=1, max_value=5, step=1)
+    dropout = hp.Float('dropout', min_value=0.0, max_value=0.9, step=0.1)
+    
+    # create lstm hypermodel
+    for _ in range(layers):
+        lstm_hypermodel.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout))
+    lstm_hypermodel.add(keras.layers.Dense(units=1, activation="linear"))
 
-    # The LSTM model to be used
-    lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
-        keras.layers.Dense(units=1, activation="linear")
-    ])
+    lstm_hypermodel.compile(loss='mean_squared_error', optimizer='adam')
 
+    return lstm_hypermodel
+
+
+
+def get_optimal_hps(train_x, train_y):
+
+    # the tuner saves files to the current working directory, delete old files if any
+    if os.path.exists('untitled_project'):
+        shutil.rmtree('untitled_project')
+
+    time_steps = train_x.shape[1]
+    features = train_x.shape[2]
+
+    # create a wrapper for the hypermodel builder to account for different input shapes
+    hypermodel_builder = lambda hp : make_lstm_hypermodel(hp, time_steps, features)
+
+    # if overwrite is false, previously-saved computed hps will be used
+    tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
-    print_train_progress_callback = CustomCallback(epochs)
 
+    # execute Hyperband search of optimal hyperparameters
+    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    
+    # hps is a dictionary of optimal hyperparameter levels
+    hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
+
+    # delete files saved by tuner in current working directory
+    shutil.rmtree('untitled_project')
+    
+    return hps
+
+
+
+
+def make_lstm_model(train_x, train_y, hps):
+
+    # optimal hyperparameter levels
+    units = hps['units']
+    layers = hps['layers']
+    dropout = hps ['dropout']
+
+    # the model input shape
+    time_steps = train_x.shape[1]
+    features = train_x.shape[2]
+
+    # the LSTM model to be used
+    lstm_model = keras.models.Sequential()
+    for _ in range(layers):
+        lstm_model.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout))
+    lstm_model.add(keras.layers.Dense(units=1, activation="linear"))
+
+    # initialize callbacks used for early stopping and printing training progress to terminal
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    print_train_progress_callback = CustomCallback(epochs=100)
+
+    # compile and fit the model
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=100, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -239,9 +290,8 @@ def forecast_lstm_model(model, test_x):
     test_features = test_x.shape[2]
 
     # Make a separate prediction for each test data window in the test dataset
-    print()
     for i in range(test_len):
-        curr_progress = round(((i + 1) / test_len) * 100, 2)
+        curr_progress =round(((i + 1) / test_len) * 100, 2)
         print(f'Prediction Progress: {curr_progress} %', end='\r')
 
         model_input = (test_x[i, :, :]).reshape(1, test_timesteps, test_features)
@@ -316,7 +366,7 @@ def print_model_performance(perf):
 
 
 
-def experiment(stock_ticker, time_steps, epochs, batch_size):	
+def experiment(stock_ticker, time_steps, repeats=2):	
 
     # get data from file
     raw_data = pd.read_csv(f'{stock_ticker}.csv')
@@ -331,23 +381,39 @@ def experiment(stock_ticker, time_steps, epochs, batch_size):
     # get data slices or windows
     train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=time_steps)
 
-    # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x, train_y, epochs=epochs, batch_size=batch_size)
+    # determine optimal hyperparameters using Hyperband tuning
+    hps = get_optimal_hps(train_x, train_y)
 
-    # get the model predictions
-    predictions = forecast_lstm_model(lstm_model, test_x)
+    print("====================================================================")
+    print(f'Optimal hyperparameters found: {hps}')
 
-    # test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
+    # sample hps
+    # hps = {'units':64, 'layers':3, 'dropout':0.6}
+
+    # Make multiple models using optimal hyperparameters to determine average performance
+    performances = []
+
+    # test_y has the shape of (samples, timesteps). Only the last timestep is the actual future forecast
     test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
-
     # revert the normalization scalings done
     test_y = invert_scaled_data(test_y, scaler, col_names, feature="Stock Returns")
-    predictions = invert_scaled_data(predictions, scaler, col_names, feature="Stock Returns")
 
-    # get model performance statistics
-    perf = get_lstm_model_perf(predictions, test_y)
+    print("====================================================================")
+    for i in range(repeats):
+        print(f"Experiment {i + 1} / {repeats}")
+        # create, compile, and fit an lstm model
+        lstm_model = make_lstm_model(train_x, train_y, hps)
 
-    return perf
+        # get the model predictions
+        predictions = forecast_lstm_model(lstm_model, test_x)
+        predictions = invert_scaled_data(predictions, scaler, col_names, feature="Stock Returns")
+
+        # get model performance statistics
+        perf = get_lstm_model_perf(predictions, test_y)
+        performances.append(perf)
+        print("====================================================================")
+
+    return performances
 
 
 
@@ -355,24 +421,13 @@ def main():
     os.chdir('data')
 
     # stock to be predicted
-    stock_ticker = 'JFC'
-
+    stock_ticker = 'BPI'
     # parameters of each model
     time_steps = 1
-    epochs = 100
-    batch_size = 32
-
     # how many models built (min = 2)
     repeats = 10
-    
-    print("====================================================================")
-    performances = []
 
-    for i in range(repeats):
-        print(f"Experiment {i + 1} / {repeats}")
-        perf = experiment(stock_ticker, time_steps, epochs, batch_size)
-        performances.append(perf)
-        print("====================================================================")
+    performances = experiment(stock_ticker, time_steps, repeats)
 
     mean_da = mean([perf['da'] for perf in performances])
     mean_uda = mean([perf['uda'] for perf in performances])
@@ -381,7 +436,7 @@ def main():
     std_da = stdev([perf['da'] for perf in performances])
     std_uda = stdev([perf['uda'] for perf in performances])
     std_dda = stdev([perf['dda'] for perf in performances])
-    
+
     optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
     pessimistic_baseline = 1 - optimistic_baseline
     
@@ -405,6 +460,11 @@ def main():
 
     print(f"Optimistic Baseline DA: {round(optimistic_baseline, 6)}")
     print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
+
+
+
+
+
 
 
 
