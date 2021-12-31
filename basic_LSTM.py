@@ -17,6 +17,9 @@ class CustomCallback(keras.callbacks.Callback):
         curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
         print(f'Training Progress: {curr_progress} %', end='\r')
 
+    def on_train_end(self, logs=None):
+        print()
+
 
 
 
@@ -251,7 +254,6 @@ def forecast_lstm_model(model, test_x):
     test_features = test_x.shape[2]
 
     # Make a separate prediction for each test data window in the test dataset
-    print()
     for i in range(test_len):
         curr_progress = round(((i + 1) / test_len) * 100, 2)
         print(f'Prediction Progress: {curr_progress} %', end='\r')
@@ -375,7 +377,7 @@ def main():
     epochs = 100
 
     # how many models built (min = 2)
-    repeats = 10
+    repeats = 2
     
     print("====================================================================")
     performances = []
