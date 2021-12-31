@@ -25,10 +25,10 @@ def preprocess_data(data):
     (i.e. Closing Stock Prices -> Stock Returns)
 
     Args:
-        data (DataFrame): The raw data read from a csv file.
+        data (pd.DataFrame): The raw data read from a csv file.
 
     Returns:
-        DataFrame: The processed dataset.
+        pd.DataFrame: The processed dataset.
     """ 
     # get closing prices from data
     try:
@@ -65,10 +65,10 @@ def train_test_split(data):
     The train and test data are split with a ratio of 8:2.
 
     Args:
-        data (DataFrame): The entire dataset.
+        data (pd.DataFrame): The entire dataset.
 
     Returns:
-        DataFrame, DataFrame: The train and test datasets.
+        pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
     test_len = len(data) * 2 // 10
     train, test = data[:-test_len], data[-test_len:]
@@ -81,8 +81,8 @@ def scale_data(train, test):
     """Applies Yeo-Johnson transformation to train and test datasets. 
     Each column or feature in the dataset is standardized separately.
     Args:
-        train (DataFrame): The test dataset.
-        test (DataFrame): The train dataset.
+        train (pd.DataFrame): The test dataset.
+        test (pd.DataFrame): The train dataset.
     Returns:
         Yeo-Johnson transformed train and test datasets.
     """
@@ -157,13 +157,13 @@ def make_data_window(train, test, time_steps=1):
     dataset will be [5, 7].
 
     Args:
-        train (DataFrame): The train dataset.
-        test (DataFrame): The test dataset.
+        train (pd.DataFrame): The train dataset.
+        test (pd.DataFrame): The test dataset.
         time_steps (int, optional): How many time steps should
         be in each data window. Defaults to 1.
 
     Returns:
-        DataFrames (4): The train_x, train_y, test_x, and test_y datasets.
+        pd.DataFrame (4): The train_x, train_y, test_x, and test_y datasets.
     """	
     # get the column index of stock returns in the dataframe
     stock_returns_index = train.columns.get_loc("Stock Returns")
@@ -360,6 +360,7 @@ def experiment(stock_ticker, time_steps, epochs):
     perf = get_lstm_model_perf(predictions, test_y)
 
     return perf
+
 
 
 
