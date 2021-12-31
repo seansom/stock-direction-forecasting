@@ -123,6 +123,19 @@ def scale_data(train, test):
 
 
 def invert_scaled_data(data, scaler, col_names, feature="Stock Returns"):
+    """Inverses scaling done through Yeo-Johnson transformation. To be used
+    with the predicted stock returns of the direction forecasting model.
+
+    Args:
+        data (np.array): The array representing scaled data.
+        scaler (PowerTransformer): The scaler used to scale data.
+        col_names (list): The list of the column names of the initaial dataset.
+        feature (str, optional): The single feature to invert scaling. 
+        Defaults to "Stock Returns".
+
+    Returns:
+        np.array: The array representing the unscaled data.
+    """    
     unscaled_data = pd.DataFrame(np.zeros((len(data), len(col_names))), columns=col_names)
     unscaled_data[feature] = data
     unscaled_data = pd.DataFrame(scaler.inverse_transform(unscaled_data), columns=col_names)
@@ -189,7 +202,7 @@ def make_data_window(train, test, time_steps=1):
 
 
 
-def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
+def make_lstm_model(train_x, train_y, epochs=100):
     """Builds, compiles, fits, and returns an LSTM model based on
     provided training inputs and targets, as well as epochs and batch size.
 
@@ -197,7 +210,6 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
         train_x (np.array): The model inputs for training.
         train_y (np.array): The model target outputs for training.
         epochs (int, optional): Number of times the model is fitted. Defaults to 100.
-        batch_size (int, optional): Number of samples processed before model is updated. Defaults to 32.
 
     Returns:
         Model: The built Keras LSTM model.
@@ -215,7 +227,7 @@ def make_lstm_model(train_x, train_y, epochs=100, batch_size=32):
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, batch_size=batch_size, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -316,7 +328,7 @@ def print_model_performance(perf):
 
 
 
-def experiment(stock_ticker, time_steps, epochs, batch_size):	
+def experiment(stock_ticker, time_steps, epochs):	
 
     # get data from file
     raw_data = pd.read_csv(f'{stock_ticker}.csv')
@@ -332,7 +344,7 @@ def experiment(stock_ticker, time_steps, epochs, batch_size):
     train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=time_steps)
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x, train_y, epochs=epochs, batch_size=batch_size)
+    lstm_model = make_lstm_model(train_x, train_y, epochs=epochs)
 
     # get the model predictions
     predictions = forecast_lstm_model(lstm_model, test_x)
@@ -355,12 +367,11 @@ def main():
     os.chdir('data')
 
     # stock to be predicted
-    stock_ticker = 'JFC'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 1
     epochs = 100
-    batch_size = 32
 
     # how many models built (min = 2)
     repeats = 10
@@ -370,7 +381,7 @@ def main():
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf = experiment(stock_ticker, time_steps, epochs, batch_size)
+        perf = experiment(stock_ticker, time_steps, epochs)
         performances.append(perf)
         print("====================================================================")
 
