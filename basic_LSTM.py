@@ -330,7 +330,18 @@ def print_model_performance(perf):
 
 
 
-def experiment(stock_ticker, time_steps, epochs):	
+def experiment(stock_ticker, time_steps, epochs):
+    """Function that creates and evaluates a single model.
+    Returns the performance metrics of the created model.
+
+    Args:
+        stock_ticker (string): The target stock to be predicted.
+        time_steps (int): The number of timesteps in the data window inputs.
+        epochs (int): The maximum number of training epochs.
+
+    Returns:
+        dict: A dictionary of the performance metrics of the created model.
+    """    	
 
     # get data from file
     raw_data = pd.read_csv(f'{stock_ticker}.csv')
