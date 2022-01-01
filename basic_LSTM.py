@@ -3,7 +3,7 @@ from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import os, sys, math
-from sklearn.preprocessing import PowerTransformer, StandardScaler
+from sklearn.preprocessing import PowerTransformer
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -19,8 +19,6 @@ class CustomCallback(keras.callbacks.Callback):
 
     def on_train_end(self, logs=None):
         print()
-
-
 
 
 def preprocess_data(data):
@@ -43,7 +41,6 @@ def preprocess_data(data):
     stock_returns = []
     for i in range(1, len(data)):
         stock_return = math.log(close[i] / close[i - 1])
-        # stock_return = ((close[i] - close[i - 1]) / close[i - 1]) * 100
         stock_returns.append(stock_return)
 
 
@@ -61,8 +58,6 @@ def preprocess_data(data):
     return processed_data
 
 
-
-
 def train_test_split(data):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
@@ -76,8 +71,6 @@ def train_test_split(data):
     test_len = len(data) * 2 // 10
     train, test = data[:-test_len], data[-test_len:]
     return train, test
-
-
 
 
 def scale_data(train, test):
@@ -94,7 +87,6 @@ def scale_data(train, test):
     col_num = train.shape[1]
 
     # scale data for train & test data
-    # scaler = StandardScaler()
     scaler = PowerTransformer()
     
     # Apply Yeo-Johnson Transform
@@ -123,8 +115,6 @@ def scale_data(train, test):
     return scaler, train, test, col_names
 
 
-
-
 def invert_scaled_data(data, scaler, col_names, feature="Stock Returns"):
     """Inverses scaling done through Yeo-Johnson transformation. To be used
     with the predicted stock returns of the direction forecasting model.
@@ -144,8 +134,6 @@ def invert_scaled_data(data, scaler, col_names, feature="Stock Returns"):
     unscaled_data = pd.DataFrame(scaler.inverse_transform(unscaled_data), columns=col_names)
 
     return unscaled_data[feature].values
-
-
 
 
 def make_data_window(train, test, time_steps=1):
@@ -203,8 +191,6 @@ def make_data_window(train, test, time_steps=1):
     return train_x, train_y, test_x, test_y
 
 
-
-
 def make_lstm_model(train_x, train_y, epochs=100):
     """Builds, compiles, fits, and returns an LSTM model based on
     provided training inputs and targets, as well as epochs and batch size.
@@ -233,8 +219,6 @@ def make_lstm_model(train_x, train_y, epochs=100):
     lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
-
-
 
 
 def forecast_lstm_model(model, test_x):
@@ -267,8 +251,6 @@ def forecast_lstm_model(model, test_x):
 
     predictions = (np.array(predictions)).flatten()
     return predictions
-
-
 
 
 def get_lstm_model_perf(predictions, actuals):
@@ -304,8 +286,6 @@ def get_lstm_model_perf(predictions, actuals):
     return {"total_ups":total_ups, "total_downs":total_downs, "tp":tp, "tn":tn, "fp":fp, "fn":fn, "da":da, "uda":uda, "dda":dda}
 
 
-
-
 def print_model_performance(perf):
     """Prints out the performance metrics of a model to the terminal.
 
@@ -313,21 +293,19 @@ def print_model_performance(perf):
         perf (dict): A dictionary containing difference performance metrics of a model.
     """	
 
-    print("====================================================================")
+    print("===================================================")
     print(f"Total Ups: {perf['total_ups']}")
     print(f"Total Downs: {perf['total_downs']}")
-    print("====================================================================")
+    print("===================================================")
     print(f"TP: {perf['tp']}")
     print(f"TN: {perf['tn']}")
     print(f"FP: {perf['fp']}")
     print(f"FN: {perf['fn']}")
-    print("====================================================================")
+    print("===================================================")
     print(f"DA: {round(perf['da'], 6)}")
     print(f"UDA: {round(perf['uda'], 6)}")
     print(f"DDA: {round(perf['dda'], 6)}")
-    print("====================================================================")
-
-
+    print("===================================================")
 
 
 def experiment(stock_ticker, time_steps, epochs):
@@ -375,8 +353,6 @@ def experiment(stock_ticker, time_steps, epochs):
     return perf
 
 
-
-
 def main():
     os.chdir('data')
 
@@ -390,14 +366,14 @@ def main():
     # how many models built (min = 2)
     repeats = 2
     
-    print("====================================================================")
+    print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
         perf = experiment(stock_ticker, time_steps, epochs)
         performances.append(perf)
-        print("====================================================================")
+        print("===================================================")
 
     mean_da = mean([perf['da'] for perf in performances])
     mean_uda = mean([perf['uda'] for perf in performances])
@@ -430,8 +406,6 @@ def main():
 
     print(f"Optimistic Baseline DA: {round(optimistic_baseline, 6)}")
     print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
-
-
 
 
 if __name__ == '__main__':
