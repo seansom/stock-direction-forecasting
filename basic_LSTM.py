@@ -385,6 +385,10 @@ def main():
     
     optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
     pessimistic_baseline = 1 - optimistic_baseline
+
+    print(f'Stock: {stock_ticker}')
+
+    print()
     
     print(f'Total Ups: {performances[0]["total_ups"]}')
     print(f'Total Downs: {performances[0]["total_downs"]}')
