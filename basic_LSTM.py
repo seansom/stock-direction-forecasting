@@ -364,7 +364,7 @@ def main():
     epochs = 100
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 10
     
     print("===================================================")
     performances = []
