@@ -21,6 +21,26 @@ class CustomCallback(keras.callbacks.Callback):
         print()
 
 
+
+def get_dates_five_years():
+    """Returns a 2-item tuple of dates 5 years in between today.
+    i.e., (2017-02-13, 2022-02-11)
+    """    
+    pass
+
+
+def get_technical_data(date_range):    
+    pass
+
+
+def get_fundamental_data(date_range):
+    pass
+
+
+def get_sentimental_data(date_range):
+    pass
+
+
 def preprocess_data(data):
     """Function which proceses raw values into usable data
     (i.e. Closing Stock Prices -> Stock Returns)
@@ -45,6 +65,8 @@ def preprocess_data(data):
 
 
     volume = data['Volume']
+    print(type(volume))
+    sys.exit()
     volumes = []
     for i in range(1, len(data)):
         volumes.append(volume[i] / 1000)
