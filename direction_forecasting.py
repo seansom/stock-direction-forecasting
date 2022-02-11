@@ -445,8 +445,6 @@ def visualize_returns(stock_ticker):
     print(perf)
     print("===================================================")
 
-    init_warchest = 100000
-
     pyplot.plot(targets)
     pyplot.plot(predictions)
 
