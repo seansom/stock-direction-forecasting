@@ -29,15 +29,15 @@ def get_dates_five_years():
     pass
 
 
-def get_technical_data(date_range):    
+def get_technical_data(stock_ticker, date_range):    
     pass
 
 
-def get_fundamental_data(date_range):
+def get_fundamental_data(stock_ticker, date_range):
     pass
 
 
-def get_sentimental_data(date_range):
+def get_sentimental_data(stock_ticker, date_range):
     pass
 
 
