@@ -65,7 +65,7 @@ def preprocess_data(data):
 
 
     volume = data['Volume']
-    volumes = []
+    volumes = [] 
     for i in range(1, len(data)):
         volumes.append(volume[i] / 1000)
 
