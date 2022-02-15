@@ -45,17 +45,42 @@ def get_technical_indicators(data):
         pd.Dataframe: Dataframe containing dates, log stock returns and technical indicators.
     """    
 
-    # get closing prices from data
+    # get closing prices and volume from data
     try:
         close = data['adjusted_close']
     except KeyError:
         close = data['close']
+    volume = data['volume']
+
+    data_len = len(close)
 
     # compute log stock returns
     stock_returns = [np.NaN]
-    for i in range(1, len(close)):
+    for i in range(1, data_len):
         stock_return = math.log(close[i] / close[i - 1])
         stock_returns.append(stock_return)
+
+    # compute A/D indicator values
+    ad_period = 5
+    ad = [np.NaN] * (ad_period - 1)
+
+    for i in range(ad_period, data_len + 1):
+        ad_high = (close[i - ad_period : i]).max()
+        ad_low = (close[i - ad_period : i]).min()
+        ad_close = close[i - 1]
+        ad_volume = (volume[i - ad_period : i]).sum()
+
+        if ad_high == ad_low:
+            raise Exception('Error in computing A/D indicator. A period had the same high and low closing price.')
+
+        curr_ad =  (((ad_close - ad_low) - (ad_high - ad_close)) / (ad_high - ad_low)) * ad_volume
+        ad.append(curr_ad)
+
+    print(ad[:8])
+    print(len(ad))
+    print(data_len)
+    sys.exit()
+
 
     # convert to dataframe
     returns = pd.DataFrame({
@@ -88,7 +113,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
 
     # compute an adjusted from or start date for the API
     first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
-    adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=50)).strftime('%Y-%m-%d')
+    adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
     
     url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
 
@@ -160,6 +185,9 @@ def get_technical_data(stock_ticker, date_range):
     # convert to pd.dataframe
     data = pd.json_normalize(data)
 
+    # # minimize volume data
+    # data["volume"] = data["volume"].apply(lambda x: x)
+
     # compute returns and technical indicators not available on EOD
     technical_indicators = get_technical_indicators(data)
     data = data.merge(technical_indicators, on='date')
@@ -177,24 +205,22 @@ def get_technical_data(stock_ticker, date_range):
     # reset indices after dropping rows
     data = data.reset_index(drop=True)
 
-    # get available technical indicators from API
-    atr = get_technical_indicator_from_EOD('atr', 14, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
-    data = data.merge(atr, on='date')
+    # get available technical indicators from API. format: (indicator, period)
+    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14)]
+    #[('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('macd', 5), ('ema', 5), ('slope', 5)]
+    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
-    rsi = get_technical_indicator_from_EOD('rsi', 14, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
-    data = data.merge(rsi, on='date')
-
-    cci = get_technical_indicator_from_EOD('cci', 20, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
-    data = data.merge(cci, on='date')
-
-    adx = get_technical_indicator_from_EOD('adx', 14, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
-    data = data.merge(adx, on='date')
+    for indicator, period in EOD_indicators:
+        indicator_data = get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
+        data = data.merge(indicator_data, on='date')
 
     # remove unneeded features/columns in dataframe
     data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'volume', 'close'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
+
+    # data["ema"] = data["ema"].apply(lambda x: x / 1000)
 
     return data
 
