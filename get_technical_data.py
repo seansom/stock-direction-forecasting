@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from decimal import Decimal
 import datetime, requests, json, math, sys, os
 
 
@@ -50,45 +51,37 @@ def get_technical_indicators(data):
         close = data['adjusted_close']
     except KeyError:
         close = data['close']
-    volume = data['volume']
 
     data_len = len(close)
 
     # compute log stock returns
     stock_returns = [np.NaN]
     for i in range(1, data_len):
-        stock_return = math.log(close[i] / close[i - 1])
+        stock_return = math.log(Decimal(close[i]) / Decimal(close[i - 1]))
         stock_returns.append(stock_return)
 
     # compute A/D indicator values
-    ad_period = 5
-    ad = [np.NaN] * (ad_period - 1)
+    ad = []
+    for i in range(data_len):
+        ad_close = Decimal(close[i])
+        ad_low = Decimal(data['low'][i])
+        ad_high = Decimal(data['high'][i])
 
-    for i in range(ad_period, data_len + 1):
-        ad_high = (close[i - ad_period : i]).max()
-        ad_low = (close[i - ad_period : i]).min()
-        ad_close = close[i - 1]
-        ad_volume = (volume[i - ad_period : i]).sum()
-
-        if ad_high == ad_low:
-            raise Exception('Error in computing A/D indicator. A period had the same high and low closing price.')
-
-        curr_ad =  (((ad_close - ad_low) - (ad_high - ad_close)) / (ad_high - ad_low)) * ad_volume
+        if ad_low == ad_high:
+            raise Exception(f'Error getting A/D indicator. A period has the same high and low price (zero division error).')
+        
+        mfm = ((ad_close - ad_low) - (ad_high - ad_close)) / (ad_high - ad_low)
+        curr_ad =  mfm * data['volume'][i]
         ad.append(curr_ad)
 
-    print(ad[:8])
-    print(len(ad))
-    print(data_len)
-    sys.exit()
-
-
     # convert to dataframe
-    returns = pd.DataFrame({
+    technical_indicators = pd.DataFrame({
         'date': data['date'],
-        'log_return': stock_returns
+        'log_return': stock_returns,
+        'ad' : ad
     })
 
-    return returns
+    return technical_indicators
 
 
 def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, date_range):
@@ -220,13 +213,17 @@ def get_technical_data(stock_ticker, date_range):
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
 
-    # data["ema"] = data["ema"].apply(lambda x: x / 1000)
+    # linearly scale up/down indicators to avoid power transform errors
+    for indicator in data.columns:
+        if indicator != 'date':
+            scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
+            data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor - 2))))
 
     return data
 
 
 def main():
-    print(get_technical_data('AP', get_dates_five_years(testing=True)))
+    print(get_technical_data('BPI', get_dates_five_years(testing=True)))
 
 
 if __name__ == '__main__':

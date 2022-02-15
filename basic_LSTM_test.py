@@ -337,7 +337,7 @@ def experiment(stock_ticker, time_steps, epochs):
 def main():
 
     # stock to be predicted
-    stock_ticker = 'MER'
+    stock_ticker = 'TEL'
 
     # parameters of each model
     time_steps = 1
