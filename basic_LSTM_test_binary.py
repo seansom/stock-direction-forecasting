@@ -3,7 +3,7 @@ from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import datetime, requests, json, math, sys, os
-from sklearn.preprocessing import PowerTransformer
+from sklearn.preprocessing import PowerTransformer, MinMaxScaler, StandardScaler
 from get_technical_data import get_technical_data, get_dates_five_years
 
 
@@ -78,20 +78,19 @@ def scale_data(train, test):
     test = scaler.transform(test)
 
     # scale down outliers in train and test data
-    outlier_val = 4.5
     for row in range(train.shape[0]):
         for col in range(col_num):
-            if train[row, col] > outlier_val:
-                train[row, col] = outlier_val
-            elif train[row, col] < -outlier_val:
-                train[row, col] = -outlier_val
+            if train[row, col] > 4.5:
+                train[row, col] = 4.5
+            elif train[row, col] < -4.5:
+                train[row, col] = -4.5
 
     for row in range(test.shape[0]):
         for col in range(col_num):
-            if test[row, col] > outlier_val:
-                test[row, col] = outlier_val
-            elif test[row, col] < -outlier_val:
-                test[row, col] = -outlier_val
+            if test[row, col] > 4.5:
+                test[row, col] = 4.5
+            elif test[row, col] < -4.5:
+                test[row, col] = -4.5
 
     # reconvert to dataframes
     train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
@@ -159,13 +158,13 @@ def make_data_window(train, test, time_steps=1):
 
         if (i + time_steps) < train_len:
             train_x.append([train[j, :] for j in range(i, i + time_steps)])
-            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+            train_y.append([1 if train[j, stock_returns_index] >= 0 else -1 for j in range(i + 1, i + time_steps + 1)])
             
     for i in range(test_len):
         
         if (i + time_steps) < test_len:
             test_x.append([test[j, :] for j in range(i, i + time_steps)])
-            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+            test_y.append([1 if train[j, stock_returns_index] >= 0 else -1 for j in range(i + 1, i + time_steps + 1)])
 
 
     train_x = np.array(train_x)
@@ -191,17 +190,16 @@ def make_lstm_model(train_x, train_y, epochs=100):
 
     # The LSTM model to be used
     lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
-        keras.layers.Dense(units=1, activation="linear")
+        keras.layers.LSTM(units=4, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.2),	
+        keras.layers.Dense(units=1, activation="softmax")
     ])
 
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
 
-    lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.compile(loss='binary_crossentropy', optimizer='adam')
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[ print_train_progress_callback])
+
 
     return lstm_model
 
@@ -235,6 +233,8 @@ def forecast_lstm_model(model, test_x):
     print()
 
     predictions = (np.array(predictions)).flatten()
+    print(predictions)
+    sys.exit()
     return predictions
 
 
@@ -338,14 +338,14 @@ def experiment(stock_ticker, time_steps, epochs):
 def main():
 
     # stock to be predicted
-    stock_ticker = 'SM'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 1
     epochs = 100
 
     # how many models built (min = 2)
-    repeats = 10
+    repeats = 2
     
     print("===================================================")
     performances = []

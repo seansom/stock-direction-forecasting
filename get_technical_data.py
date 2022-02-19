@@ -74,11 +74,51 @@ def get_technical_indicators(data):
         curr_ad =  mfm * data['volume'][i]
         ad.append(curr_ad)
 
+    # compute William's %R indicator values
+    wr_period = 14
+    wr = [np.NaN] * (wr_period - 1)
+
+    for i in range(wr_period, data_len + 1):
+        wr_high = (data['high'][i - wr_period : i]).max()
+        wr_low = (data['low'][i - wr_period : i]).min()
+        wr_close = close[i - 1]
+
+        if wr_low == wr_high:
+            raise Exception(f"Error getting William's %R indicator. A period has the same highest and lowest price (zero division error).")
+        
+        curr_wr = Decimal(wr_high - wr_close) / Decimal(wr_high - wr_low)
+        wr.append(curr_wr)
+
+    # compute Chaulkin Money Flow indicator
+    cmf_period = 20
+
+    mfv = []
+    cmf = [np.NaN] * (cmf_period - 1)
+
+    for i in range(data_len):
+        cmf_close = Decimal(close[i])
+        cmf_low = Decimal(data['low'][i])
+        cmf_high = Decimal(data['high'][i])
+        cmf_volume = data['volume'][i]
+
+        if cmf_low == cmf_high:
+            raise Exception(f'Error getting CMF indicator. A period has the same high and low price (zero division error).')
+
+        curr_mfv = (((cmf_close - cmf_low) - (cmf_high - cmf_close)) / (cmf_high - cmf_low)) *  cmf_volume
+        mfv.append(curr_mfv)
+
+    for i in range(cmf_period, data_len + 1):
+        curr_cmf = sum(mfv[i - cmf_period : i]) / sum(data['volume'][i - cmf_period : i])
+        cmf.append(curr_cmf)
+
+
     # convert to dataframe
     technical_indicators = pd.DataFrame({
         'date': data['date'],
         'log_return': stock_returns,
-        'ad' : ad
+        'ad' : ad,
+        'wr' : wr,
+        'cmf' : cmf
     })
 
     return technical_indicators
@@ -199,8 +239,8 @@ def get_technical_data(stock_ticker, date_range):
     data = data.reset_index(drop=True)
 
     # get available technical indicators from API. format: (indicator, period)
-    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14)]
-    #[('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('macd', 5), ('ema', 5), ('slope', 5)]
+    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
+    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
     #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
     for indicator, period in EOD_indicators:
@@ -214,10 +254,10 @@ def get_technical_data(stock_ticker, date_range):
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
 
     # linearly scale up/down indicators to avoid power transform errors
-    for indicator in data.columns:
-        if indicator != 'date':
-            scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
-            data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor - 2))))
+    # for indicator in data.columns:
+    #     if indicator != 'date':
+    #         scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
+    #         data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor))))
 
     return data
 
