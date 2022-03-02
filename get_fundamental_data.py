@@ -69,7 +69,11 @@ def get_psei_returns(date_range, token):
     stock_ticker = 'PSEI'
     exchange = 'INDX'
 
-    url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
+    # compute an adjusted from or start date for the API
+    first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
+    adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
+
+    url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}"
     response = requests.get(url)
     data = response.json()
 
@@ -94,6 +98,22 @@ def get_psei_returns(date_range, token):
         'date': data['date'],
         'psei_returns': stock_returns
     })
+
+    # remove rows with dates earlier than wanted from date
+    for index, row in psei_returns.iterrows():
+
+        # date of current row entry
+        curr_date = datetime.datetime.strptime(row['date'],'%Y-%m-%d')
+
+        # remove unneeded earlier row entries
+        if curr_date < first_trading_day_datetime:
+            psei_returns.drop(index, inplace=True)
+
+        else:
+            break
+
+    # reset indices after dropping rows
+    psei_returns = psei_returns.reset_index(drop=True)
     
     return psei_returns
 
@@ -287,7 +307,7 @@ def get_fundamental_data(stock_ticker, date_range):
     psei_returns = get_psei_returns(date_range, token)
 
     #merge data sets
-    fundamental_data = fundamental_data.join(psei_returns.set_index('date'), on='date',)
+    fundamental_data = fundamental_data.join(psei_returns.set_index('date'), on='date')
 
     return fundamental_data
 
@@ -296,7 +316,7 @@ def main():
     fundamental_data = get_fundamental_data(stock_ticker, get_dates_five_years(testing=True))
     
     #convert to csv to check
-    fundamental_data.to_csv('fundamental_data.csv')
+    fundamental_data.to_csv('fundamental_data_v1.csv')
 
 if __name__ == '__main__':
     main()
