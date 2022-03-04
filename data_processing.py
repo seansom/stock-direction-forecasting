@@ -3,13 +3,15 @@ import numpy as np
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
-import datetime, requests, json, math, sys, os
+import datetime, requests, json, math, shelve, sys, os
 
 #get_technical_data START
 def get_dates_five_years(testing=False):
     """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
+
     Args:
         testing (bool, optional): If set to true, always returns ('2017-02-13', '2022-02-11'). Defaults to False.
+
     Returns:
         tuple: (from_date, to_date)
     """
@@ -39,8 +41,10 @@ def get_trading_dates(stock_ticker, date_range, token):
 
 def get_technical_indicators(data):
     """Computes for log stock returns and technical indicators unavailable to EOD (e.g., A/D, CMF, WR).
+
     Args:
         data (pd.Dataframe): Dataframe containing dates and OHLCV stock data from EOD.
+
     Returns:
         pd.Dataframe: Dataframe containing dates, log stock returns and technical indicators.
     """    
@@ -125,6 +129,7 @@ def get_technical_indicators(data):
 
 def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, date_range):
     """Gets daily technical indicator data from EOD API.
+
     Args:
         indicator (str): The indicator for use in EOD API calls. (e.g., rsi)
         period (str): The period used in computing the technical indicator.
@@ -132,10 +137,12 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         exchange (str): The stock exchange where the stock is being traded (e.g., PSE)
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+
     Raises:
         Exception: Raises exception whenever gathered indicator data is insufficient to cover the specified
         date range. This may be fixed by increasing the timedelta used in computing the adjusted_first_day variable
         within the function.
+
     Returns:
         pd.Dataframe: Dataframe containing dates and specified technical indicator data
     """
@@ -549,8 +556,10 @@ def get_fundamental_data(stock_ticker, date_range):
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
+    
     Args:
         data (pd.DataFrame): The entire dataset.
+
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """	
@@ -565,8 +574,10 @@ def scale_data(data):
 def train_test_split(data):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
+
     Args:
         data (pd.DataFrame): The entire dataset.
+
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
@@ -578,9 +589,11 @@ def train_test_split(data):
 def transform_data(train, test):
     """Applies Yeo-Johnson transformation to train and test datasets. 
     Each column or feature in the dataset is standardized separately.
+
     Args:
         train (pd.DataFrame): The test dataset.
         test (pd.DataFrame): The train dataset.
+
     Returns:
         Yeo-Johnson transformed train and test datasets.
     """
@@ -620,12 +633,14 @@ def transform_data(train, test):
 def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     """Inverses scaling done through Yeo-Johnson transformation. To be used
     with the predicted stock returns of the direction forecasting model.
+
     Args:
         data (np.array): The array representing scaled data.
         scaler (PowerTransformer): The scaler used to scale data.
         col_names (list): The list of the column names of the initaial dataset.
         feature (str, optional): The single feature to invert scaling. 
         Defaults to "Stock Returns".
+
     Returns:
         np.array: The array representing the unscaled data.
     """    
@@ -636,12 +651,14 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data):
+def data_processing(technical_data, fundamental_data, drop_col=None):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
+
     Args:
         technical_data (pd.DataFrame): The dataset containing technical indicators.
         fundamental_data (pd.DataFrame): The dataset containing fundamental indicators.
+
     Returns:
         scaler, PowerTransformer: Scaler used in the power transform
         train, pd.DataFrame: The processed train dataset.
@@ -651,9 +668,16 @@ def data_processing(technical_data, fundamental_data):
     data = technical_data.join(fundamental_data.set_index('date'), on='date')
     data.dropna(inplace=True)
     data.reset_index(drop=True, inplace=True)
-    
+
     #remove date column
     data.drop(columns='date', inplace=True)
+
+    if drop_col is not None:
+        data.drop(columns=drop_col, inplace=True)
+
+    # raise exception if missing/null value is found in the combined dataset
+    if data.isnull().values.any():
+        raise Exception(f'Null value found in combined dataset.')
 
     #scale data
     scaled_data = scale_data(data)
@@ -676,11 +700,13 @@ def make_data_window(train, test, time_steps=1):
     and a timestep of 2, the resulting _x dataset will be
     [[[1, 2], [3, 4]], [[3, 4], [5, 6]]] while the resulting _y
     dataset will be [5, 7].
+
     Args:
         train (pd.DataFrame): The train dataset.
         test (pd.DataFrame): The test dataset.
         time_steps (int, optional): How many time steps should
         be in each data window. Defaults to 1.
+
     Returns:
         pd.DataFrame (4): The train_x, train_y, test_x, and test_y datasets.
     """	
@@ -719,12 +745,60 @@ def make_data_window(train, test, time_steps=1):
     return train_x, train_y, test_x, test_y
 #data_processing END
 
+
+def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
+    if date_range == None:
+        date_range = get_dates_five_years(testing=True)
+
+    os.chdir('data')
+
+    # reset database if it gets too large (current max size = 20 MB)
+    if os.path.getsize('stock_database.dat') > 20000000:
+        os.remove('stock_database.bak')
+        os.remove('stock_database.dat')
+        os.remove('stock_database.dir')
+
+    # open stock_database to see if data was already collected from API
+    # otherwise, get data from API and store it in database
+    stock_database = shelve.open('stock_database')
+    stock_database_key = f"{stock_ticker} {date_range}"
+
+    if stock_database_key in stock_database:
+        technical_data = stock_database[stock_database_key]['technical_data']
+        fundamental_data = stock_database[stock_database_key]['fundamental_data']
+
+    else:
+        os.chdir('..')
+        technical_data = get_technical_data(stock_ticker, date_range)
+        fundamental_data = get_fundamental_data(stock_ticker, date_range)
+        os.chdir('data')
+
+        stock_database[stock_database_key] = {
+            'technical_data' : technical_data,
+            'fundamental_data' : fundamental_data
+        }
+        
+    stock_database.close()
+    os.chdir('..')
+
+    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, drop_col)
+    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
+
+    return scaler, col_names, train_x, train_y, test_x, test_y
+
+
 def main():
-    stock_ticker = 'BPI'
-    scaler, train, test, col_names = data_processing(get_technical_data(stock_ticker, get_dates_five_years(testing=True)), get_fundamental_data(stock_ticker, get_dates_five_years(testing=True)))
-    print(train, test)
+    stock_ticker = 'AP'
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=['psei_returns'])
+
+    # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    print(col_names)
+
+    print(train_x.shape)
+
+    print(train_x, test_y)
     print(type(scaler))
-    train_x, train_y, test_x, test_y = make_data_window(train, test)
+
 
 if __name__ == '__main__':
     main()
