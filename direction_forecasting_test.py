@@ -181,7 +181,7 @@ def feature_selection(stock_ticker, timesteps):
     num_features = len(features)
     dropped_features = features.copy()
 
-    repeats = 10
+    repeats = 25
 
     print("===================================================")
     print("Starting Feature Selection...")
@@ -242,7 +242,7 @@ def main():
     repeats = 5
 
     # dropped features
-    dropped_features = ['ad', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    dropped_features = ['wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'gdp', 'real_interest_rate', 'roe', 'psei_returns']
     
     print("===================================================")
     performances = []
