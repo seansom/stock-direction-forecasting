@@ -593,7 +593,7 @@ def train_test_split(data, time_steps):
 
     target_indices = list(range(time_steps, data_len))
 
-    random.seed(7)
+    random.seed(0)
     random.shuffle(target_indices)
 
     train_targets = sorted(target_indices[:-test_len])

@@ -2,7 +2,7 @@ from tensorflow import keras
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys, math
+import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
 from data_processing_test_sean import get_dataset, inverse_transform_data
 
@@ -140,57 +140,64 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(stock_ticker, time_steps, epochs, drop_col=None):
-    """Function that creates and evaluates a single model.
-    Returns the performance metrics of the created model.
+def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
-    Args:
-        stock_ticker (string): The target stock to be predicted.
-        time_steps (int): The number of timesteps in the data window inputs.
-        epochs (int): The maximum number of training epochs.
-
-    Returns:
-        dict: A dictionary of the performance metrics of the created model.
-    """
-
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=drop_col)
+    train_x_copy = copy.deepcopy(train_x)
+    train_y_copy = copy.deepcopy(train_y)
+    test_x_copy = copy.deepcopy(test_x)
+    test_y_copy = copy.deepcopy(test_y)
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x, train_y, epochs=100)
+    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100)
 
     # get the model predictions
-    predictions = forecast_lstm_model(lstm_model, test_x)
+    predictions = forecast_lstm_model(lstm_model, test_x_copy)
 
     # test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
-    test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
+    test_y_copy = np.array([test_y_copy[i, -1] for i in range(len(test_y_copy))])
 
     # revert the normalization scalings done
-    test_y = inverse_transform_data(test_y, scaler, col_names, feature="log_return")
+    test_y_copy = inverse_transform_data(test_y_copy, scaler, col_names, feature="log_return")
     predictions = inverse_transform_data(predictions, scaler, col_names, feature="log_return")
 
     # get model performance statistics
-    perf = get_lstm_model_perf(predictions, test_y)
+    perf = get_lstm_model_perf(predictions, test_y_copy)
 
-    return perf, test_y, predictions
+    return perf, test_y_copy, predictions
 
 
 
-def feature_selection(stock_ticker, timesteps):
+def feature_selection(stock_ticker, time_steps, repeats=10):
     
-    features = ['ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
     num_features = len(features)
     dropped_features = features.copy()
 
-    repeats = 10
-
     print("===================================================")
     print("Starting Feature Selection...")
-    print(f"Features Tested: 0/{num_features} (current: None)")
+    print(f"Round 0/{num_features}")
+    print(f"Features Tested: 0/{num_features} (current features: [])")
     
 
     model_perfs = []
+
+    scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
+    validation_len = train_x.shape[0] * 25 // 100
+
+    shuffled_train_indices = list(range(train_x.shape[0]))
+    random.seed(0)
+    random.shuffle(shuffled_train_indices)
+
+    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+
+    adjusted_train_x = shuffled_train_x[:-validation_len]
+    adjusted_train_y = shuffled_train_y[:-validation_len]
+    validation_x = shuffled_train_x[-validation_len:]
+    validation_y = shuffled_train_y[-validation_len:]
+
     for _ in range(repeats):
-        curr_model_perf, _, _ = experiment(stock_ticker, timesteps, 100, drop_col=dropped_features)
+        curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
         model_perfs.append(curr_model_perf['da'])
 
     curr_best_da = mean(model_perfs)
@@ -199,31 +206,62 @@ def feature_selection(stock_ticker, timesteps):
     print(f"Dropped Features: {dropped_features}")
     print("===================================================")
 
+    added_features = []
+    curr_mean_model_perfs = [0] * (len(features) + 1)
+    curr_mean_model_perfs[0] = curr_best_da
 
-    for index, feature in enumerate(features):
+    for test_round in range(num_features):
 
-        print(f"Features Tested: {index + 1}/{num_features} (current: {feature})")
+        prev_round_best_da = curr_best_da
 
-        model_perfs = []
-        dropped_features.remove(feature)
+        for index, feature in enumerate(features):
 
-        for _ in range(repeats):
-            curr_model_perf, _, _ = experiment(stock_ticker, timesteps, 100, drop_col=dropped_features)
-            model_perfs.append(curr_model_perf['da'])
+            if feature in added_features:
+                continue
 
-        curr_da = mean(model_perfs)
+            added_features.append(feature)
 
-        print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
-        print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+            print(f"Round {test_round + 1}/{num_features}")
+            print(f"Features Tested: {index + 1}/{num_features} (current features: {added_features})")
 
-        if curr_da > curr_best_da:
-            curr_best_da = curr_da
-        else:
-            dropped_features.append(feature)
+            model_perfs = []
 
-        
-        print(f"Dropped Features: {dropped_features}")
-        print("===================================================")
+            dropped_features = features.copy()
+            for added_feature in added_features:
+                dropped_features.remove(added_feature)
+            
+            scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
+            validation_len = train_x.shape[0] * 25 // 100
+
+            shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+            shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+
+            adjusted_train_x = shuffled_train_x[:-validation_len]
+            adjusted_train_y = shuffled_train_y[:-validation_len]
+            validation_x = shuffled_train_x[-validation_len:]
+            validation_y = shuffled_train_y[-validation_len:]
+
+            for _ in range(repeats):
+                curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
+                model_perfs.append(curr_model_perf['da'])
+
+            curr_da = mean(model_perfs)
+            curr_mean_model_perfs[index + 1] = curr_da
+
+            if curr_da > curr_best_da:
+                curr_best_da = curr_da
+
+            added_features.remove(feature)
+
+            print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+            print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+            print("===================================================")
+
+        if curr_best_da == prev_round_best_da:
+            break
+
+        curr_best_feature_index = curr_mean_model_perfs.index(curr_best_da) - 1
+        added_features.append(features[curr_best_feature_index])
 
     return dropped_features
 
@@ -231,24 +269,25 @@ def feature_selection(stock_ticker, timesteps):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'SM'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 5
     epochs = 100
 
     # how many models built (min = 2)
-    repeats = 5
+    repeats = 2
 
     # dropped features
-    dropped_features = ['wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'signal', 'divergence', 'inflation', 'roe', 'p/e', 'psei_returns']
+    dropped_features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
     
     print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(stock_ticker, time_steps, epochs, drop_col=dropped_features)
+        perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y)
         performances.append(perf)
         print("===================================================")
 
@@ -290,30 +329,8 @@ def main():
 
 
 
-def visualize_returns(stock_ticker):
-    from matplotlib import pyplot
-    os.chdir('data')
-
-    perf, targets, predictions = experiment(stock_ticker, 1, 100)
-
-    print("===================================================")
-    print(perf)
-    print("===================================================")
-
-    pyplot.plot(targets)
-    pyplot.plot(predictions)
-
-    pyplot.title(f"{stock_ticker} Stock Returns")
-    pyplot.legend(['Actual Stock Returns', 'Predicted Stock Returns'])
-
-    pyplot.show()
-
-
-
-
 if __name__ == '__main__':
     main()
-    # visualize_returns('BPI')
 
-    # pruned_features = feature_selection('SM', 5)
+    pruned_features = feature_selection('AP', 5, repeats=25)
     # print(f"Dropped Features: {pruned_features}")

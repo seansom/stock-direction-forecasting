@@ -153,7 +153,7 @@ def experiment(stock_ticker, time_steps, epochs, drop_col=None):
         dict: A dictionary of the performance metrics of the created model.
     """
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=drop_col)
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=drop_col)
 
     # create, compile, and fit an lstm model
     lstm_model = make_lstm_model(train_x, train_y, epochs=100)
