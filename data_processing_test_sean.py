@@ -488,7 +488,7 @@ def get_fundamental_data(stock_ticker, date_range):
     share_holder_assets_data = raw_fundamental_data['Financials']['Balance_Sheet']['yearly']
 
     #compute roe
-    for item, key in net_income_data.items():
+    for _, key in net_income_data.items():
         if start_date <= datetime.datetime.strptime(key['date'], "%Y-%m-%d") <= end_date:
             yearly_date.append(key['date'])
             roe.append(float(key['netIncome']))
@@ -752,9 +752,6 @@ def make_data_window(train, test, train_targets, test_targets, train_indices, te
     # convert dataframes into numpy arrays
     train = train.to_numpy()
     test = test.to_numpy()
-
-    train_len = train.shape[0]
-    test_len = test.shape[0]
 
     # x values: the input data window
     # y values: actual future values to be predicted from data window
