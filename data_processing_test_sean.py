@@ -17,7 +17,7 @@ def get_dates_five_years(testing=False):
     """
 
     if testing:
-        return ('2019-02-13', '2022-02-11')
+        return ('2017-02-13', '2022-02-11')
 
     # generate datetime objects
     date_today = datetime.datetime.now()
@@ -287,7 +287,6 @@ def get_fundamental_trading_dates(stock_ticker, date_range, token):
 
     return data[['date', close]]
 
-
 def get_psei_returns(date_range, token):
     """computes log stock returns for PSEI
     
@@ -351,12 +350,13 @@ def get_psei_returns(date_range, token):
     
     return psei_returns
 
-
 def get_fundamental_indicator_from_EOD(stock_ticker, token):
     """get fundamental indicators from EOD
+
     Args:
         stock_ticker (str): stock ticker of the company to get data from
         token (str): eod api token
+
     Returns:
         json: data in json format containing fundamental indicators from EOD
     """
@@ -369,7 +369,6 @@ def get_fundamental_indicator_from_EOD(stock_ticker, token):
     data = response.json()
 
     return data
-
 
 def get_macro_indicator_from_EOD(token, date_range):
     """compiles macroeconomic data from eod
@@ -415,6 +414,13 @@ def get_macro_indicator_from_EOD(token, date_range):
             gdp.append(gdp_data['Value'][ind])
             infl.append(infl_data['Value'][ind])
             intrst.append(intrst_data['Value'][ind])
+
+    if not gdp_date:
+        print('No data within the data range for macroeconomic data, using last available data')
+        gdp_date.append(date_range[1])
+        gdp.append(gdp_data['Value'][0])
+        infl.append(infl_data['Value'][0])
+        intrst.append(intrst_data['Value'][0])
     
     #convert into pd.Dataframe
     macro_data = pd.DataFrame({
@@ -425,7 +431,6 @@ def get_macro_indicator_from_EOD(token, date_range):
     })
     
     return macro_data
-
 
 def get_fundamental_data(stock_ticker, date_range):
     """Computes fundamental data for a specific stock. Also adds macro economic data. To be used for model training.
@@ -492,6 +497,13 @@ def get_fundamental_data(stock_ticker, date_range):
         if start_date <= datetime.datetime.strptime(key['date'], "%Y-%m-%d") <= end_date:
             share_holder_assets.append(float(key['totalStockholderEquity']))
     
+    if not yearly_date:
+        print('No data within the data range for roe, using last available data')
+        key = next(iter(net_income_data))
+        yearly_date.append(date_range[1])
+        roe.append(float(net_income_data[key]['netIncome']))
+        share_holder_assets.append(float(share_holder_assets_data[key]['totalStockholderEquity']))
+
     for ind1 in range(len(roe)):
         roe[ind1] = roe[ind1]/share_holder_assets[ind1]
 
@@ -542,7 +554,7 @@ def get_fundamental_data(stock_ticker, date_range):
     psei_returns = get_psei_returns(date_range, token)
 
     #merge data sets
-    fundamental_data = fundamental_data.join(psei_returns.set_index('date'), on='date',)
+    fundamental_data = fundamental_data.join(psei_returns.set_index('date'), on='date')
 
     return fundamental_data
 #get_fundamental_data END
@@ -550,21 +562,17 @@ def get_fundamental_data(stock_ticker, date_range):
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
-    
     Args:
         data (pd.DataFrame): The entire dataset.
-
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """	
 
-    try:
-        for indicator in data.columns:
-            scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
-            data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor))))
-    except:
-        print(indicator)
-        sys.exit()
+    for indicator in data.columns:
+        if (data[f'{indicator}'] == 0).all():
+            continue
+        scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
+        data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor))))
 
     return data
 
@@ -711,6 +719,7 @@ def data_processing(technical_data, fundamental_data, time_steps, drop_col=None)
 
     #split data into train and test
     train, test, train_targets, test_targets, train_indices, test_indices = train_test_split(scaled_data, time_steps)
+
     
     #apply Yeo-Johnson Power Transfrom
     scaler, train, test, col_names = transform_data(train, test)
@@ -777,7 +786,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     os.chdir('data')
 
     # reset database if it gets too large (current max size = 20 MB)
-    if os.path.getsize('stock_database.dat') > 20000000:
+    if os.path.exists('stock_database.dat') and os.path.getsize('stock_database.dat') > 20000000:
         os.remove('stock_database.bak')
         os.remove('stock_database.dat')
         os.remove('stock_database.dir')
@@ -826,3 +835,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # print(get_fundamental_data('AP', get_dates_five_years(testing=True)))

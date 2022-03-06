@@ -428,7 +428,6 @@ def get_macro_indicator_from_EOD(token, date_range):
         "inflation": infl,
         "real_interest_rate": intrst
     })
-    macro_data.to_csv('macro_data.csv')
     
     return macro_data
 
@@ -744,4 +743,5 @@ def main():
     train_x, train_y, test_x, test_y = make_data_window(train, test)
 
 if __name__ == '__main__':
-    main()
+    # main()
+    print(get_fundamental_data('AP', get_dates_five_years(testing=True)))
