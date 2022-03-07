@@ -1,11 +1,11 @@
-# random split with shuffling
+# no random splitting with shuffling, modified val split
 from tensorflow import keras
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean import get_dataset, inverse_transform_data
+from data_processing import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -168,7 +168,7 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
 
 
-def feature_selection(stock_ticker, time_steps, repeats=10):
+def feature_selection(stock_ticker, time_steps, repeats=5):
     
     features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
     num_features = len(features)
@@ -232,7 +232,6 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
                 dropped_features.remove(added_feature)
             
             scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
-            print(col_names)
             validation_len = train_x.shape[0] * 25 // 100
 
             shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
@@ -273,19 +272,21 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
 
 
 
+
 def main():
     # stock to be predicted
     stock_ticker = 'AP'
 
     # parameters of each model
-    time_steps = 20
+    time_steps = 5
+    epochs = 100
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
     dropped_features = None
-    #['wr', 'cmf', 'rsi', 'adx', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    # ['wr', 'cmf', 'atr', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
 
@@ -308,6 +309,7 @@ def main():
         print(f"Experiment {i + 1} / {repeats}")
         perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, shuffled_test_x, shuffled_test_y)
         performances.append(perf)
+        print_model_performance(perf)
         print("===================================================")
 
     mean_da = mean([perf['da'] for perf in performances])
@@ -351,5 +353,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-    # pruned_features = feature_selection('AP', 5, repeats=2)
+    # pruned_features = feature_selection('SM', 5)
     # print(f"Dropped Features: {pruned_features}")

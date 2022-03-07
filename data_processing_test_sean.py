@@ -589,9 +589,10 @@ def train_test_split(data, time_steps):
     """	
     
     data_len = len(data)
-    test_len = data_len * 2 // 10
-
+    
     target_indices = list(range(time_steps, data_len))
+    test_len = len(target_indices) * 2 // 10
+    
 
     random.seed(0)
     random.shuffle(target_indices)
@@ -819,7 +820,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
 
 def main():
     stock_ticker = 'AP'
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=['psei_returns'])
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=5, drop_col=['psei_returns'])
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
     print(col_names)
