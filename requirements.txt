@@ -2,3 +2,5 @@ numpy
 pandas
 tensorflow
 keras-tuner
+eventregistry
+gensim
