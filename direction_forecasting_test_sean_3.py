@@ -257,11 +257,15 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
             print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
             print("===================================================")
 
-        if curr_best_da == prev_round_best_da:
+        if curr_best_da <= prev_round_best_da:
             break
 
         curr_best_feature_index = curr_mean_model_perfs.index(curr_best_da) - 1
         added_features.append(features[curr_best_feature_index])
+
+    dropped_features = features.copy()
+    for added_feature in added_features:
+        dropped_features.remove(added_feature)
 
     return dropped_features
 
@@ -269,25 +273,38 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'ALI'
 
     # parameters of each model
-    time_steps = 5
-    epochs = 100
+    time_steps = 2
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
     dropped_features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    #['wr', 'cmf', 'rsi', 'adx', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
+
+    shuffled_train_indices = list(range(train_x.shape[0]))
+    shuffled_test_indices = list(range(test_x.shape[0]))
+    random.seed(0)
+    random.shuffle(shuffled_train_indices)
+    random.seed(0)
+    random.shuffle(shuffled_test_indices)
+
+    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+    shuffled_test_x = np.array([test_x[i] for i in shuffled_test_indices])
+    shuffled_test_y = np.array([test_y[i] for i in shuffled_test_indices])
     
     print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y)
+        perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, shuffled_test_x, shuffled_test_y)
         performances.append(perf)
         print("===================================================")
 
@@ -332,5 +349,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-    pruned_features = feature_selection('AP', 5, repeats=25)
+    # pruned_features = feature_selection('AP', 5, repeats=5)
     # print(f"Dropped Features: {pruned_features}")
