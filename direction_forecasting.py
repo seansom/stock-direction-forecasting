@@ -1,9 +1,11 @@
-from tensorflow import keras
+# no random splitting with shuffling, modified val split
+from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys, math
+import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
+from data_processing_kenneth import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -22,195 +24,6 @@ class CustomCallback(keras.callbacks.Callback):
 
 
 
-def get_dates_five_years():
-    """Returns a 2-item tuple of dates 5 years in between today.
-    i.e., (2017-02-13, 2022-02-11)
-    """    
-    pass
-
-
-def get_technical_data(stock_ticker, date_range):    
-    pass
-
-
-def get_fundamental_data(stock_ticker, date_range):
-    pass
-
-
-def get_sentimental_data(stock_ticker, date_range):
-    pass
-
-
-def preprocess_data(data):
-    """Function which proceses raw values into usable data
-    (i.e. Closing Stock Prices -> Stock Returns)
-
-    Args:
-        data (pd.DataFrame): The raw data read from a csv file.
-
-    Returns:
-        pd.DataFrame: The processed dataset.
-    """ 
-    # get closing prices from data
-    try:
-        close = data['Adj Close']
-    except KeyError:
-        close = data['Close']
-
-    # convert closing prices to stock returns
-    stock_returns = []
-    for i in range(1, len(data)):
-        stock_return = math.log(close[i] / close[i - 1])
-        stock_returns.append(stock_return)
-
-
-    volume = data['Volume']
-    volumes = [] 
-    for i in range(1, len(data)):
-        volumes.append(volume[i] / 1000)
-
-    # convert to dataframe
-    processed_data = pd.DataFrame({
-        'Stock Returns': stock_returns,
-        'Volume': volumes
-    })
-
-    return processed_data
-
-
-def train_test_split(data):
-    """Splits a dataset into training and testing samples.
-    The train and test data are split with a ratio of 8:2.
-
-    Args:
-        data (pd.DataFrame): The entire dataset.
-
-    Returns:
-        pd.DataFrame, pd.DataFrame: The train and test datasets.
-    """	
-    test_len = len(data) * 2 // 10
-    train, test = data[:-test_len], data[-test_len:]
-    return train, test
-
-
-def scale_data(train, test):
-    """Applies Yeo-Johnson transformation to train and test datasets. 
-    Each column or feature in the dataset is standardized separately.
-    Args:
-        train (pd.DataFrame): The test dataset.
-        test (pd.DataFrame): The train dataset.
-    Returns:
-        Yeo-Johnson transformed train and test datasets.
-    """
-    # store column names
-    col_names = list(train.columns)
-    col_num = train.shape[1]
-
-    # scale data for train & test data
-    scaler = PowerTransformer()
-    
-    # Apply Yeo-Johnson Transform
-    train = scaler.fit_transform(train)
-    test = scaler.transform(test)
-
-    # scale down outliers in train and test data
-    for row in range(train.shape[0]):
-        for col in range(col_num):
-            if train[row, col] > 4.5:
-                train[row, col] = 4.5
-            elif train[row, col] < -4.5:
-                train[row, col] = -4.5
-
-    for row in range(test.shape[0]):
-        for col in range(col_num):
-            if test[row, col] > 4.5:
-                test[row, col] = 4.5
-            elif test[row, col] < -4.5:
-                test[row, col] = -4.5
-
-    # reconvert to dataframes
-    train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
-    test = pd.DataFrame({col: test[:, i] for i, col in enumerate(col_names)})
-
-    return scaler, train, test, col_names
-
-
-def invert_scaled_data(data, scaler, col_names, feature="Stock Returns"):
-    """Inverses scaling done through Yeo-Johnson transformation. To be used
-    with the predicted stock returns of the direction forecasting model.
-
-    Args:
-        data (np.array): The array representing scaled data.
-        scaler (PowerTransformer): The scaler used to scale data.
-        col_names (list): The list of the column names of the initaial dataset.
-        feature (str, optional): The single feature to invert scaling. 
-        Defaults to "Stock Returns".
-
-    Returns:
-        np.array: The array representing the unscaled data.
-    """    
-    unscaled_data = pd.DataFrame(np.zeros((len(data), len(col_names))), columns=col_names)
-    unscaled_data[feature] = data
-    unscaled_data = pd.DataFrame(scaler.inverse_transform(unscaled_data), columns=col_names)
-
-    return unscaled_data[feature].values
-
-
-def make_data_window(train, test, time_steps=1):
-    """Creates data windows for the train and test datasets.
-    Splits train and test datasets into train_x, train_y, test_x,
-    and test_y datasets. The _x datasets represent model input datasets
-    while _y datasets represent model target datasets. 
-
-    i.e., for a sample dataset [[1, 2], [3, 4], [5, 6], [7, 8]]
-    and a timestep of 2, the resulting _x dataset will be
-    [[[1, 2], [3, 4]], [[3, 4], [5, 6]]] while the resulting _y
-    dataset will be [5, 7].
-
-    Args:
-        train (pd.DataFrame): The train dataset.
-        test (pd.DataFrame): The test dataset.
-        time_steps (int, optional): How many time steps should
-        be in each data window. Defaults to 1.
-
-    Returns:
-        pd.DataFrame (4): The train_x, train_y, test_x, and test_y datasets.
-    """	
-    # get the column index of stock returns in the dataframe
-    stock_returns_index = train.columns.get_loc("Stock Returns")
-
-    # convert dataframes into numpy arrays
-    train = train.to_numpy()
-    test = test.to_numpy()
-
-    train_len = train.shape[0]
-    test_len = test.shape[0]
-
-    # x values: the input data window
-    # y values: actual future values to be predicted from data window
-    train_x, train_y, test_x, test_y = [], [], [], []
-
-    for i in range(train_len):
-
-        if (i + time_steps) < train_len:
-            train_x.append([train[j, :] for j in range(i, i + time_steps)])
-            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
-            
-    for i in range(test_len):
-        
-        if (i + time_steps) < test_len:
-            test_x.append([test[j, :] for j in range(i, i + time_steps)])
-            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
-
-
-    train_x = np.array(train_x)
-    train_y = np.array(train_y)
-    test_x = np.array(test_x)
-    test_y = np.array(test_y)
-
-    return train_x, train_y, test_x, test_y
-
-
 def make_lstm_model(train_x, train_y, epochs=100):
     """Builds, compiles, fits, and returns an LSTM model based on
     provided training inputs and targets, as well as epochs and batch size.
@@ -226,13 +39,11 @@ def make_lstm_model(train_x, train_y, epochs=100):
 
     # The LSTM model to be used
     lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
+        keras.layers.LSTM(units=16, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),	
         keras.layers.Dense(units=1, activation="linear")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=2, mode='min', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
@@ -328,71 +139,150 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(stock_ticker, time_steps, epochs):
-    """Function that creates and evaluates a single model.
-    Returns the performance metrics of the created model.
+def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
-    Args:
-        stock_ticker (string): The target stock to be predicted.
-        time_steps (int): The number of timesteps in the data window inputs.
-        epochs (int): The maximum number of training epochs.
-
-    Returns:
-        dict: A dictionary of the performance metrics of the created model.
-    """    	
-
-    # get data from file
-    raw_data = pd.read_csv(f'{stock_ticker}.csv')
-
-    # preprocess data (i.e. calculate returns)
-    data = preprocess_data(raw_data)
-
-    # split and scale data
-    train, test = train_test_split(data)
-    scaler, train, test, col_names = scale_data(train, test)
-
-    # get data slices or windows
-    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps=time_steps)
+    train_x_copy = copy.deepcopy(train_x)
+    train_y_copy = copy.deepcopy(train_y)
+    test_x_copy = copy.deepcopy(test_x)
+    test_y_copy = copy.deepcopy(test_y)
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x, train_y, epochs=epochs)
+    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100)
 
     # get the model predictions
-    predictions = forecast_lstm_model(lstm_model, test_x)
+    predictions = forecast_lstm_model(lstm_model, test_x_copy)
 
     # test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
-    test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
+    test_y_copy = np.array([test_y_copy[i, -1] for i in range(len(test_y_copy))])
 
     # revert the normalization scalings done
-    test_y = invert_scaled_data(test_y, scaler, col_names, feature="Stock Returns")
-    predictions = invert_scaled_data(predictions, scaler, col_names, feature="Stock Returns")
+    test_y_copy = inverse_transform_data(test_y_copy, scaler, col_names, feature="log_return")
+    predictions = inverse_transform_data(predictions, scaler, col_names, feature="log_return")
 
     # get model performance statistics
-    perf = get_lstm_model_perf(predictions, test_y)
+    perf = get_lstm_model_perf(predictions, test_y_copy)
 
-    return perf, test_y, predictions
+    return perf, test_y_copy, predictions
+
+
+
+def feature_selection(stock_ticker, time_steps, repeats=5):
+    
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    num_features = len(features)
+    dropped_features = features.copy()
+
+    print("===================================================")
+    print("Starting Feature Selection...")
+    print(f"Round 0/{num_features}")
+    print(f"Features Tested: 0/{num_features} (current features: [])")
+    
+
+    model_perfs = []
+
+    scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
+    validation_len = train_x.shape[0] * 25 // 100
+
+    validation_x = train_x[-validation_len:]
+    validation_y = train_y[-validation_len:]
+
+    for _ in range(repeats):
+        curr_model_perf, _, _ = experiment(scaler, col_names, train_x, train_y, validation_x, validation_y)
+        model_perfs.append(curr_model_perf['da'])
+
+    curr_best_da = mean(model_perfs)
+    
+    print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
+    print(f"Dropped Features: {dropped_features}")
+    print("===================================================")
+
+    added_features = []
+    curr_mean_model_perfs = [0] * (len(features) + 1)
+    curr_mean_model_perfs[0] = curr_best_da
+
+    for test_round in range(num_features):
+
+        prev_round_best_da = curr_best_da
+
+        for index, feature in enumerate(features):
+
+            if feature in added_features:
+                continue
+
+            added_features.append(feature)
+
+            print(f"Round {test_round + 1}/{num_features}")
+            print(f"Features Tested: {index + 1}/{num_features} (current features: {added_features})")
+
+            model_perfs = []
+
+            dropped_features = features.copy()
+            for added_feature in added_features:
+                dropped_features.remove(added_feature)
+            
+            scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
+
+            validation_x = train_x[-validation_len:]
+            validation_y = train_y[-validation_len:]
+
+            for _ in range(repeats):
+                curr_model_perf, _, _ = experiment(scaler, col_names, train_x, train_y, validation_x, validation_y)
+                model_perfs.append(curr_model_perf['da'])
+
+            curr_da = mean(model_perfs)
+            curr_mean_model_perfs[index + 1] = curr_da
+
+            if curr_da > curr_best_da:
+                curr_best_da = curr_da
+
+            added_features.remove(feature)
+
+            print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+            print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+            print("===================================================")
+
+        if curr_best_da <= prev_round_best_da:
+            break
+
+        curr_best_feature_index = curr_mean_model_perfs.index(curr_best_da) - 1
+        added_features.append(features[curr_best_feature_index])
+
+    dropped_features = features.copy()
+    for added_feature in added_features:
+        dropped_features.remove(added_feature)
+
+    return dropped_features
+
+
 
 
 def main():
-    os.chdir('data')
-
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'MER'
 
     # parameters of each model
     time_steps = 1
     epochs = 100
 
     # how many models built (min = 2)
-    repeats = 10
+    repeats = 2
+
+    # dropped features
+    dropped_features = ['cmf', 'atr', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
+
+
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
     
     print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(stock_ticker, time_steps, epochs)
+        perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y)
         performances.append(perf)
+        print_model_performance(perf)
         print("===================================================")
 
     mean_da = mean([perf['da'] for perf in performances])
@@ -433,27 +323,11 @@ def main():
 
 
 
-def visualize_returns(stock_ticker):
-    from matplotlib import pyplot
-    os.chdir('data')
-
-    perf, targets, predictions = experiment(stock_ticker, 1, 100)
-
-    print("===================================================")
-    print(perf)
-    print("===================================================")
-
-    pyplot.plot(targets)
-    pyplot.plot(predictions)
-
-    pyplot.title(f"{stock_ticker} Stock Returns")
-    pyplot.legend(['Actual Stock Returns', 'Predicted Stock Returns'])
-
-    pyplot.show()
-
-
-
-
 if __name__ == '__main__':
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
+
     main()
-    # visualize_returns('BPI')
+
+    # pruned_features = feature_selection('SM', 1, repeats=5)
+    # print(f"Dropped Features: {pruned_features}")
