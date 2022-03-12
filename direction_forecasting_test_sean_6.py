@@ -1,11 +1,11 @@
-# random splitting without shuffling
+# no random splitting with shuffling, modified val split
 from tensorflow import keras
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys, math, copy
+import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean import get_dataset, inverse_transform_data
+from data_processing_kenneth import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -39,13 +39,11 @@ def make_lstm_model(train_x, train_y, epochs=100):
 
     # The LSTM model to be used
     lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
+        keras.layers.LSTM(units=16, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),	
         keras.layers.Dense(units=1, activation="linear")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=2, mode='min', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
@@ -168,7 +166,7 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
 
 
-def feature_selection(stock_ticker, time_steps, repeats=10):
+def feature_selection(stock_ticker, time_steps, repeats=5):
     
     features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
     num_features = len(features)
@@ -185,13 +183,11 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
     scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
     validation_len = train_x.shape[0] * 25 // 100
 
-    adjusted_train_x = train_x[:-validation_len]
-    adjusted_train_y = train_y[:-validation_len]
     validation_x = train_x[-validation_len:]
     validation_y = train_y[-validation_len:]
 
     for _ in range(repeats):
-        curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
+        curr_model_perf, _, _ = experiment(scaler, col_names, train_x, train_y, validation_x, validation_y)
         model_perfs.append(curr_model_perf['da'])
 
     curr_best_da = mean(model_perfs)
@@ -225,16 +221,12 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
                 dropped_features.remove(added_feature)
             
             scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
-            print(col_names)
-            validation_len = train_x.shape[0] * 25 // 100
 
-            adjusted_train_x = train_x[:-validation_len]
-            adjusted_train_y = train_y[:-validation_len]
             validation_x = train_x[-validation_len:]
             validation_y = train_y[-validation_len:]
 
             for _ in range(repeats):
-                curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
+                curr_model_perf, _, _ = experiment(scaler, col_names, train_x, train_y, validation_x, validation_y)
                 model_perfs.append(curr_model_perf['da'])
 
             curr_da = mean(model_perfs)
@@ -263,19 +255,23 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
 
 
 
+
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'MER'
 
     # parameters of each model
     time_steps = 1
+    epochs = 100
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = None
-    #['wr', 'cmf', 'rsi', 'adx', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    dropped_features = ['cmf', 'atr', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
+
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
     
@@ -286,6 +282,7 @@ def main():
         print(f"Experiment {i + 1} / {repeats}")
         perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y)
         performances.append(perf)
+        print_model_performance(perf)
         print("===================================================")
 
     mean_da = mean([perf['da'] for perf in performances])
@@ -329,5 +326,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-    # pruned_features = feature_selection('AP', 5, repeats=2)
+    # pruned_features = feature_selection('SM', 1, repeats=5)
     # print(f"Dropped Features: {pruned_features}")

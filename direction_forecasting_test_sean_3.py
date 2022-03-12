@@ -45,11 +45,11 @@ def make_lstm_model(train_x, train_y, epochs=100):
         keras.layers.Dense(units=1, activation="linear")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=500, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -278,7 +278,7 @@ def main():
     stock_ticker = 'AP'
 
     # parameters of each model
-    time_steps = 20
+    time_steps = 100
 
     # how many models built (min = 2)
     repeats = 2

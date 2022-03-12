@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing import get_dataset, inverse_transform_data
+from data_processing_test_sean_2 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -24,7 +24,7 @@ class CustomCallback(keras.callbacks.Callback):
 
 
 
-def make_lstm_model(train_x, train_y, epochs=100):
+def make_lstm_model(train_x, train_y, validation_x, validation_y, epochs=100):
     """Builds, compiles, fits, and returns an LSTM model based on
     provided training inputs and targets, as well as epochs and batch size.
 
@@ -45,11 +45,11 @@ def make_lstm_model(train_x, train_y, epochs=100):
         keras.layers.Dense(units=1, activation="linear")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=8, mode='min', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_data=(validation_x, validation_y),  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -141,7 +141,7 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
+def experiment(scaler, col_names, train_x, train_y, validation_x, validation_y, test_x, test_y):
 
     train_x_copy = copy.deepcopy(train_x)
     train_y_copy = copy.deepcopy(train_y)
@@ -149,7 +149,7 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
     test_y_copy = copy.deepcopy(test_y)
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100)
+    lstm_model = make_lstm_model(train_x_copy, train_y_copy, validation_x, validation_y, epochs=100)
 
     # get the model predictions
     predictions = forecast_lstm_model(lstm_model, test_x_copy)
@@ -183,22 +183,28 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
     model_perfs = []
 
     scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
-    validation_len = train_x.shape[0] * 25 // 100
+    validation_len = train_x.shape[0] * 105 // 1000
 
-    shuffled_train_indices = list(range(train_x.shape[0]))
+    adjusted_train_x = train_x[:-validation_len]
+    adjusted_train_y = train_y[:-validation_len]
+    validation_x = train_x[-validation_len:]
+    validation_y = train_y[-validation_len:]
+
+    shuffled_train_indices = list(range(adjusted_train_x.shape[0]))
+    shuffled_validation_indices = list(range(validation_x.shape[0]))
+
     random.seed(0)
     random.shuffle(shuffled_train_indices)
+    random.seed(0)
+    random.shuffle(shuffled_validation_indices)
 
-    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
-
-    adjusted_train_x = shuffled_train_x[:-validation_len]
-    adjusted_train_y = shuffled_train_y[:-validation_len]
-    validation_x = shuffled_train_x[-validation_len:]
-    validation_y = shuffled_train_y[-validation_len:]
+    adjusted_train_x = np.array([adjusted_train_x[i] for i in shuffled_train_indices])
+    adjusted_train_y = np.array([adjusted_train_y[i] for i in shuffled_train_indices])
+    validation_x = np.array([validation_x[i] for i in shuffled_validation_indices])
+    validation_y = np.array([validation_y[i] for i in shuffled_validation_indices])
 
     for _ in range(repeats):
-        curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
+        curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y, validation_x, validation_y)
         model_perfs.append(curr_model_perf['da'])
 
     curr_best_da = mean(model_perfs)
@@ -232,18 +238,19 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
                 dropped_features.remove(added_feature)
             
             scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
-            validation_len = train_x.shape[0] * 25 // 100
 
-            shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-            shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+            adjusted_train_x = train_x[:-validation_len]
+            adjusted_train_y = train_y[:-validation_len]
+            validation_x = train_x[-validation_len:]
+            validation_y = train_y[-validation_len:]
 
-            adjusted_train_x = shuffled_train_x[:-validation_len]
-            adjusted_train_y = shuffled_train_y[:-validation_len]
-            validation_x = shuffled_train_x[-validation_len:]
-            validation_y = shuffled_train_y[-validation_len:]
+            adjusted_train_x = np.array([adjusted_train_x[i] for i in shuffled_train_indices])
+            adjusted_train_y = np.array([adjusted_train_y[i] for i in shuffled_train_indices])
+            validation_x = np.array([validation_x[i] for i in shuffled_validation_indices])
+            validation_y = np.array([validation_y[i] for i in shuffled_validation_indices])
 
             for _ in range(repeats):
-                curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
+                curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y, validation_x, validation_y)
                 model_perfs.append(curr_model_perf['da'])
 
             curr_da = mean(model_perfs)
@@ -275,30 +282,44 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'BPI'
 
     # parameters of each model
-    time_steps = 5
+    time_steps = 1
     epochs = 100
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = None
-    # ['wr', 'cmf', 'atr', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    dropped_features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence']
+
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
 
-    shuffled_train_indices = list(range(train_x.shape[0]))
+    validation_len = train_x.shape[0] * 105 // 1000
+    
+    adjusted_train_x = train_x[:]
+    adjusted_train_y = train_y[:]
+    validation_x = train_x[-validation_len:]
+    validation_y = train_y[-validation_len:]
+
+    shuffled_train_indices = list(range(adjusted_train_x.shape[0]))
+    shuffled_validation_indices = list(range(validation_x.shape[0]))
     shuffled_test_indices = list(range(test_x.shape[0]))
+
     random.seed(0)
     random.shuffle(shuffled_train_indices)
     random.seed(0)
+    random.shuffle(shuffled_validation_indices)
+    random.seed(0)
     random.shuffle(shuffled_test_indices)
 
-    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+    shuffled_train_x = np.array([adjusted_train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([adjusted_train_y[i] for i in shuffled_train_indices])
+    shuffled_validation_x = np.array([validation_x[i] for i in shuffled_validation_indices])
+    shuffled_validation_y = np.array([validation_y[i] for i in shuffled_validation_indices])
     shuffled_test_x = np.array([test_x[i] for i in shuffled_test_indices])
     shuffled_test_y = np.array([test_y[i] for i in shuffled_test_indices])
     
@@ -307,7 +328,7 @@ def main():
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, shuffled_test_x, shuffled_test_y)
+        perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, shuffled_validation_x, shuffled_validation_y, shuffled_test_x, shuffled_test_y)
         performances.append(perf)
         print_model_performance(perf)
         print("===================================================")
@@ -353,5 +374,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-    # pruned_features = feature_selection('SM', 5)
+    # pruned_features = feature_selection('BPI', 1, repeats=5)
     # print(f"Dropped Features: {pruned_features}")

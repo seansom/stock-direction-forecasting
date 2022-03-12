@@ -232,17 +232,20 @@ def feature_selection(stock_ticker, timesteps):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'BPI'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 1
     epochs = 100
 
     # how many models built (min = 2)
-    repeats = 5
+    repeats = 2
 
     # dropped features
-    dropped_features = ['wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'gdp', 'real_interest_rate', 'roe', 'psei_returns']
+    dropped_features =   ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+
+    
+    #bpi best ['wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'gdp', 'real_interest_rate', 'roe', 'psei_returns']
     
     print("===================================================")
     performances = []
