@@ -39,11 +39,14 @@ def make_lstm_model(train_x, train_y, epochs=100):
 
     # The LSTM model to be used
     lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=16, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),	
+        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),	
+        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),	
+        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),	
+
         keras.layers.Dense(units=1, activation="linear")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=2, mode='min', restore_best_weights=True)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
@@ -258,7 +261,7 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'MER'
+    stock_ticker = 'PGOLD'
 
     # parameters of each model
     time_steps = 1
@@ -268,9 +271,18 @@ def main():
     repeats = 2
 
     # dropped features
-    dropped_features = ['cmf', 'atr', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
-    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
-    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
+    dropped_features = ['cmf', 'cci', 'slope', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'sentiment']
+
+    # ALI ['cmf', 'atr', 'cci', 'adx', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
+    # SM ['ad', 'cmf', 'atr', 'adx', 'd_values', 'macd', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'sentiment']
+    # AP ['cmf', 'atr', 'd_values', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    # BPI ['ad', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps']
+    # MER ['cmf', 'atr', 'adx', 'd_values', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
+    # TEL ['atr', 'adx', 'd_values', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
+    # JFC ['ad', 'wr', 'cmf', 'atr', 'rsi', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'sentiment']
+    # PGOLD ['cmf', 'cci', 'slope', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'sentiment']
+    
+    # ALL ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
 
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
@@ -329,5 +341,5 @@ if __name__ == '__main__':
 
     main()
 
-    # pruned_features = feature_selection('SM', 1, repeats=5)
+    # pruned_features = feature_selection('ALI', 1, repeats=10)
     # print(f"Dropped Features: {pruned_features}")

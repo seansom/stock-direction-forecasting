@@ -1019,8 +1019,13 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     feature_selection_train_x = train_np_array[:-1]
     feature_selection_train_y = train_np_array[1:, 0]
 
+    if np.isfinite(feature_selection_train_x).all():
+        print('no null/inf value found')
+    else:
+        print('null/inf value found')
+
     correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
-    correlations = [round(abs(i), 3) for i in correlations[1:]]
+    correlations = [round(abs(i), 3) for i in correlations]
 
     # correlations = [0 if np.isinf(i) else i for i in correlations]
     # correlations = [0 if np.isnan(i) else i for i in correlations]
@@ -1031,10 +1036,10 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y)
     mutual_infos = [round(abs(i), 3) for i in mutual_infos]
 
-
-    correlations = [1 if feature >= mean(correlations) else 0 for feature in correlations]
+    correlations = [1 if feature >= 0.05 else 0 for feature in correlations]
     mutual_infos = [1 if feature >= mean(mutual_infos) else 0 for feature in mutual_infos]
-
+    correlations[0] = 1
+    mutual_infos[0] = 1
 
     col_names = list(train)
 
@@ -1043,7 +1048,7 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     
     for index, value in enumerate(correlations):
         if not value:
-            dropped_features.append(col_names[index + 1])
+            dropped_features.append(col_names[index])
 
     for index, value in enumerate(mutual_infos):
         if not value:
@@ -1156,7 +1161,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
 
 
 def main():
-    stock_ticker = 'ALI'
+    stock_ticker = 'PGOLD'
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']

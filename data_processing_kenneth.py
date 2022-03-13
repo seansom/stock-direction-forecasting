@@ -1004,7 +1004,7 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     if data.isnull().values.any():
         raise Exception(f'Null value found in combined dataset.')
 
-    print(data)
+    # print(data)
     
     #scale data
     scaled_data = scale_data(data)
