@@ -1,11 +1,11 @@
-# no random splitting with shuffling, walk forward validation
+# no random splitting with shuffling, walk forward validation with SHITTON of indicators
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean_5 import get_dataset, inverse_transform_data
+from data_processing_test_sean_8 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -35,8 +35,8 @@ def make_lstm_model(input_shape):
         keras.layers.Dense(units=1, activation='linear')
     ])
 
-
-    lstm_model.compile(loss='mean_absolute_error', optimizer='adam')
+    optimizer = keras.optimizers.Adam()
+    lstm_model.compile(loss='mean_squared_error', optimizer=optimizer)
 
     return lstm_model
 
@@ -160,13 +160,13 @@ def experiment(data):
         random.seed(0)
         random.shuffle(shuffled_train_indices)
 
-        # shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-        # shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+        shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+        shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
-        # lstm_model.set_weights(lstm_weights)
-        # lstm_model.reset_states()
+        lstm_model.set_weights(lstm_weights)
+        lstm_model.reset_states()
 
-        lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.1, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+        lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.1, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
         curr_predictions = forecast_lstm_model(lstm_model, test_x)
         curr_actuals = np.array([test_y[i, -1] for i in range(len(test_y))])
@@ -280,18 +280,19 @@ def feature_selection(stock_ticker, time_steps, train_size, test_size, repeats=5
 
 def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, repeats=25):
     
-    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=None)
+
+    features = data[0]['col_names'].copy()
+    features.remove('log_return')
+
     num_features = len(features)
     dropped_features = features.copy()
 
     print("===================================================")
     print("Starting Feature Selection...")
-    print(f"Feature Round 0/{num_features}")
-    print(f"Features Tested: 0/{num_features} (current dropped features: [])")
+    print(f"Features Tested: 0/{num_features} (current features: [])")
     
     model_perfs = []
-
-    data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=dropped_features)
 
     for index in range(len(data)):
         data[index]['test_x'] = data[index]['train_x'][-test_size:]
@@ -345,13 +346,20 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
         print(f"Dropped Features: {dropped_features}")
         print("===================================================")
 
+    added_features = [feature for feature in features if feature not in dropped_features]
+
+    print(f"Best Mean Directional Accuracy: {curr_best_da}")
+    print(f"Selected Features: {added_features}")
+    print(f"Dropped Features: {dropped_features}")
+    print("===================================================")
+
     return dropped_features
 
 
 
 def main():
     # stock to be predicted
-    stock_ticker = 'PGOLD'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 1
@@ -359,14 +367,17 @@ def main():
     test_size = 21
 
     # how many models built (min = 2)
-    repeats = 25
+    repeats = 2
 
     # dropped features
-    dropped_features = ['wr', 'cmf', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    dropped_features = None#['wr14', 'cmf20', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope4', 'slope5', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'p/e', 'psei_returns', 'sentiment']
 
-    # AP (1, 1004, 21) ['wr', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    # ALI (1, 1004, 21) ['cmf', 'atr', 'rsi', 'adx', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    # PGOLD (1, 1004, 21) ['wr', 'cmf', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    # AP (1, 1004, 21) ['wr', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'p/e', 'psei_returns', 'sentiment']
+    # ALI (1, 1004, 21) ['volume', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'sentiment']
+    # PGOLD (1, 1004, 21) ['ad', 'wr', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'mband', 'lband', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    # BPI (1, 1004, 21) ['cmf20', 'cmf5', 'atr14', 'adx14', 'k_values_x', 'signal', 'divergence', 'slope2', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+
+    ['volume', 'wr5', 'cmf20', 'cmf5', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
     # ALL ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
@@ -427,5 +438,5 @@ if __name__ == '__main__':
 
     # main()
 
-    pruned_features = simple_feature_selection('PGOLD', 1, 1004, 21, repeats=25)
+    pruned_features = simple_feature_selection('ALI', 1, 1004, 21, repeats=25)
     print(f"Dropped Features: {pruned_features}")

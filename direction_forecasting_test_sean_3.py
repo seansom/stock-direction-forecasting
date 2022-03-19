@@ -42,14 +42,16 @@ def make_lstm_model(train_x, train_y, epochs=100):
         keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
         keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
         keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
+        # keras.layers.Dense(units=16, activation="linear"),
+
         keras.layers.Dense(units=1, activation="linear")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=500, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -164,6 +166,9 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
     # get model performance statistics
     perf = get_lstm_model_perf(predictions, test_y_copy)
 
+    # print(predictions[:10])
+    # print(test_y_copy[:10])
+
     return perf, test_y_copy, predictions
 
 
@@ -275,17 +280,17 @@ def feature_selection(stock_ticker, time_steps, repeats=10):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'JFC'
 
     # parameters of each model
-    time_steps = 100
+    time_steps = 1
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = None
-    #['wr', 'cmf', 'rsi', 'adx', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    dropped_features = None#['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
 

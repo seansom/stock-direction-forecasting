@@ -1,4 +1,4 @@
-# no random splitting with shuffling, modified val split
+# vanilla implementation, testing for addition method of feature selection
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
@@ -262,17 +262,17 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'PGOLD'
+    stock_ticker = 'ALI'
 
     # parameters of each model
-    time_steps = 1
+    time_steps = 50
     epochs = 100
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = ['cmf', 'cci', 'slope', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'sentiment']
+    dropped_features = None#['cmf', 'atr', 'cci', 'adx', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
     
     # ALI ['cmf', 'atr', 'cci', 'adx', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
     # SM ['ad', 'cmf', 'atr', 'adx', 'd_values', 'macd', 'signal', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'sentiment']

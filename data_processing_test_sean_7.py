@@ -1,3 +1,4 @@
+#added shitton of indicators
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -83,41 +84,79 @@ def get_technical_indicators(data):
         ad.append(curr_ad)
 
     # compute William's %R indicator values
-    wr_period = 14
-    wr = [np.NaN] * (wr_period - 1)
+    wr14_period = 14
+    wr14 = [np.NaN] * (wr14_period - 1)
 
-    for i in range(wr_period, data_len + 1):
-        wr_high = (data['high'][i - wr_period : i]).max()
-        wr_low = (data['low'][i - wr_period : i]).min()
-        wr_close = close[i - 1]
+    for i in range(wr14_period, data_len + 1):
+        wr14_high = (data['high'][i - wr14_period : i]).max()
+        wr14_low = (data['low'][i - wr14_period : i]).min()
+        wr14_close = close[i - 1]
 
-        if wr_low == wr_high:
+        if wr14_low == wr14_high:
             raise Exception(f"Error getting William's %R indicator. A period has the same highest and lowest price (zero division error).")
         
-        curr_wr = Decimal(wr_high - wr_close) / Decimal(wr_high - wr_low)
-        wr.append(curr_wr)
+        curr_wr14 = Decimal(wr14_high - wr14_close) / Decimal(wr14_high - wr14_low)
+        wr14.append(curr_wr14)
+
+    # compute William's %R indicator values (5-day)
+    wr5_period = 5
+    wr5 = [np.NaN] * (wr5_period - 1)
+
+    for i in range(wr5_period, data_len + 1):
+        wr5_high = (data['high'][i - wr5_period : i]).max()
+        wr5_low = (data['low'][i - wr5_period : i]).min()
+        wr5_close = close[i - 1]
+
+        if wr5_low == wr5_high:
+            raise Exception(f"Error getting William's %R indicator. A period has the same highest and lowest price (zero division error).")
+        
+        curr_wr5 = Decimal(wr5_high - wr5_close) / Decimal(wr5_high - wr5_low)
+        wr5.append(curr_wr5)
 
     # compute Chaulkin Money Flow indicator
-    cmf_period = 20
+    cmf20_period = 20
 
-    mfv = []
-    cmf = [np.NaN] * (cmf_period - 1)
+    mfv20 = []
+    cmf20 = [np.NaN] * (cmf20_period - 1)
 
     for i in range(data_len):
-        cmf_close = Decimal(close[i])
-        cmf_low = Decimal(data['low'][i])
-        cmf_high = Decimal(data['high'][i])
-        cmf_volume = data['volume'][i]
+        cmf20_close = Decimal(close[i])
+        cmf20_low = Decimal(data['low'][i])
+        cmf20_high = Decimal(data['high'][i])
+        cmf20_volume = data['volume'][i]
 
-        if cmf_low == cmf_high:
+        if cmf20_low == cmf20_high:
             raise Exception(f'Error getting CMF indicator. A period has the same high and low price (zero division error).')
 
-        curr_mfv = (((cmf_close - cmf_low) - (cmf_high - cmf_close)) / (cmf_high - cmf_low)) *  cmf_volume
-        mfv.append(curr_mfv)
+        curr_mfv20 = (((cmf20_close - cmf20_low) - (cmf20_high - cmf20_close)) / (cmf20_high - cmf20_low)) *  cmf20_volume
+        mfv20.append(curr_mfv20)
 
-    for i in range(cmf_period, data_len + 1):
-        curr_cmf = sum(mfv[i - cmf_period : i]) / sum(data['volume'][i - cmf_period : i])
-        cmf.append(curr_cmf)
+    for i in range(cmf20_period, data_len + 1):
+        curr_cmf20 = sum(mfv20[i - cmf20_period : i]) / sum(data['volume'][i - cmf20_period : i])
+        cmf20.append(curr_cmf20)
+
+
+    # compute Chaulkin Money Flow indicator (5-day)
+    cmf5_period = 5
+
+    mfv5 = []
+    cmf5 = [np.NaN] * (cmf5_period - 1)
+
+    for i in range(data_len):
+        cmf5_close = Decimal(close[i])
+        cmf5_low = Decimal(data['low'][i])
+        cmf5_high = Decimal(data['high'][i])
+        cmf5_volume = data['volume'][i]
+
+        if cmf5_low == cmf5_high:
+            raise Exception(f'Error getting CMF indicator. A period has the same high and low price (zero division error).')
+
+        curr_mfv5 = (((cmf5_close - cmf5_low) - (cmf5_high - cmf5_close)) / (cmf5_high - cmf5_low)) *  cmf5_volume
+        mfv5.append(curr_mfv5)
+
+    for i in range(cmf5_period, data_len + 1):
+        curr_cmf5 = sum(mfv5[i - cmf5_period : i]) / sum(data['volume'][i - cmf5_period : i])
+        cmf5.append(curr_cmf5)
 
 
     # convert to dataframe
@@ -125,8 +164,10 @@ def get_technical_indicators(data):
         'date': data['date'],
         'log_return': stock_returns,
         'ad' : ad,
-        'wr' : wr,
-        'cmf' : cmf
+        'wr14' : wr14,
+        'wr5' : wr5,
+        'cmf20' : cmf20,
+        'cmf5' : cmf5
     })
 
     return technical_indicators
@@ -176,6 +217,8 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
 
         else:
             break
+
+    data.rename(columns={indicator:f"{indicator}{period}"}, inplace=True)
 
     # reset indices after dropping rows
     data = data.reset_index(drop=True)
@@ -244,7 +287,7 @@ def get_technical_data(stock_ticker, date_range):
     data = data.reset_index(drop=True)
 
     # get available technical indicators from API. format: (indicator, period)
-    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
+    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26), ('slope', 2), ('slope', 3), ('slope', 4), ('slope', 5), ('volatility', 5), ('bbands', 5), ('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('stochastic', 5)]
     #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
     #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
@@ -253,7 +296,7 @@ def get_technical_data(stock_ticker, date_range):
         data = data.merge(indicator_data, on='date')
 
     # remove unneeded features/columns in dataframe
-    data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'volume', 'close'])
+    data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
@@ -895,21 +938,23 @@ def scale_data(data):
     return data
 
 
-def train_test_split(data, time_steps):
-    """Splits a dataset into training and testing samples.
-    The train and test data are split with a ratio of 8:2.
+def train_test_split(data, time_steps, train_size, test_size):
 
-    Args:
-        data (pd.DataFrame): The entire dataset.
+    train_test_sets = []
 
-    Returns:
-        pd.DataFrame, pd.DataFrame: The train and test datasets.
-    """	
-    test_len = (data.shape[0] - time_steps) * 2 // 10
+    data_len = data.shape[0]
+    train_test_sets_num = (data_len - time_steps - train_size) // test_size
 
-    train, test = data[:-test_len ], data[-test_len - time_steps:]
 
-    return train, test
+    for i in range(train_test_sets_num):
+
+        curr_train = data[i * test_size : i * test_size + train_size + time_steps]
+        curr_test = data[i * test_size + train_size : (i + 1) * test_size + train_size + time_steps]
+
+        train_test_sets.append([curr_train, curr_test])
+
+
+    return train_test_sets
 
 
 def transform_data(train, test):
@@ -928,7 +973,7 @@ def transform_data(train, test):
     col_num = train.shape[1]
 
     # scale data for train & test data
-    scaler = PowerTransformer()
+    scaler = StandardScaler()
     
     # Apply Yeo-Johnson Transform
     train = scaler.fit_transform(train)
@@ -977,7 +1022,8 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col=None):
+
+def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, train_size, test_size, drop_col=None):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1011,58 +1057,49 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     scaled_data = scale_data(data)
 
     #split data into train and test
-    train, test = train_test_split(scaled_data, time_steps)
+    train_test_sets = train_test_split(scaled_data, time_steps, train_size, test_size)
 
-    # validation_len = train.shape[0] * 25 // 100
+    # FEATURE SELECTION START
 
-    train_np_array = train.to_numpy()
-    feature_selection_train_x = train_np_array[:-1]
-    feature_selection_train_y = train_np_array[1:, 0]
-
-    if np.isfinite(feature_selection_train_x).all():
-        print('no null/inf value found')
-    else:
-        print('null/inf value found')
+    feature_selection_train_x = train_test_sets[0][0].to_numpy()[:-1]
+    feature_selection_train_y = train_test_sets[0][0].to_numpy()[1:, 0]
 
     correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
     correlations = [round(abs(i), 3) for i in correlations]
 
-    correlations = [0 if np.isinf(i) else i for i in correlations]
-    correlations = [0 if np.isnan(i) else i for i in correlations]
+    correlations = [1 if i >= 0.1 else 0 for i in correlations]
 
-    print(correlations)
-    print(mean(correlations))
+    col_names = list(train_test_sets[0][0])
 
-    mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y)
-    mutual_infos = [round(abs(i), 3) for i in mutual_infos]
-
-    correlations = [1 if feature >= 0.05 else 0 for feature in correlations]
-    mutual_infos = [1 if feature >= mean(mutual_infos) else 0 for feature in mutual_infos]
-    correlations[0] = 1
-    mutual_infos[0] = 1
-
-    col_names = list(train)
+    # print(correlations)
+    # print(col_names)
 
     dropped_features = []
-    dropped_features2 = []
     
     for index, value in enumerate(correlations):
-        if not value:
+        if not value and col_names[index] != 'log_return':
             dropped_features.append(col_names[index])
 
-    for index, value in enumerate(mutual_infos):
-        if not value:
-            dropped_features2.append(col_names[index])
+    # print(dropped_features)
 
-    print(dropped_features)
-    print(dropped_features2)
+    # FEATURE SELECTION END
 
-    sys.exit()
-    
-    #apply Yeo-Johnson Power Transfrom
-    scaler, train, test, col_names = transform_data(train, test)
+    # for train_test_set in train_test_sets:
+    #     train_test_set[0] = train_test_set[0].drop(columns=dropped_features)
+    #     train_test_set[1] = train_test_set[1].drop(columns=dropped_features)
 
-    return scaler, train, test, col_names
+    processed_train_test_sets = []
+
+    for train, test in train_test_sets:
+        scaler, train, test, col_names = transform_data(train, test)
+        processed_train_test_sets.append({
+            'scaler' : scaler,
+            'train' : train,
+            'test' : test,
+            'col_names' : col_names
+        })
+
+    return processed_train_test_sets
 
 
 def make_data_window(train, test, time_steps=1):
@@ -1115,7 +1152,7 @@ def make_data_window(train, test, time_steps=1):
 #data_processing END
 
 
-def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
+def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test_size=5, drop_col=None):
     if date_range == None:
         date_range = get_dates_five_years(testing=True)
 
@@ -1154,23 +1191,41 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
-    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
+    processed_train_test_sets = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, train_size, test_size, drop_col)
 
-    return scaler, col_names, train_x, train_y, test_x, test_y
+    windowed_train_test_sets = []
+
+    for train_test_set in processed_train_test_sets:
+        train_x, train_y, test_x, test_y = make_data_window(train_test_set['train'], train_test_set['test'], time_steps)
+
+        windowed_train_test_sets.append({
+            'scaler' : train_test_set['scaler'],
+            'col_names' : train_test_set['col_names'],
+            'train_x' : train_x,
+            'train_y' : train_y,
+            'test_x' : test_x,
+            'test_y' : test_y
+        })
+
+    return windowed_train_test_sets
 
 
 def main():
-    stock_ticker = 'PGOLD'
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
+    stock_ticker = 'ALI'
+    windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=1004, test_size=21, drop_col=None)
+
+    # sys.exit()
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    print(col_names)
+    print(windowed_train_test_sets[0]['col_names'])
+    sys.exit()
 
-    print(train_x.shape, test_y.shape)
+    print(windowed_train_test_sets[0]['train_x'].shape, windowed_train_test_sets[0]['train_y'].shape)
 
-    print(test_y)
+    print(windowed_train_test_sets[0]['test_x'])
 
 
 if __name__ == '__main__':
     main()
+    # data = get_technical_data('AP', get_dates_five_years(testing=True))
+    # print(list(data))

@@ -1,9 +1,9 @@
-# random splitting without shuffling
+# ANN implementation, random split with shuffling
 from tensorflow import keras
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys, math, copy
+import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
 from data_processing_test_sean import get_dataset, inverse_transform_data
 
@@ -24,7 +24,7 @@ class CustomCallback(keras.callbacks.Callback):
 
 
 
-def make_lstm_model(train_x, train_y, epochs=100):
+def make_ann_model(train_x, train_y, epochs=5000):
     """Builds, compiles, fits, and returns an LSTM model based on
     provided training inputs and targets, as well as epochs and batch size.
 
@@ -38,23 +38,23 @@ def make_lstm_model(train_x, train_y, epochs=100):
     """	
 
     # The LSTM model to be used
-    lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),
-        keras.layers.LSTM(units=64, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=0.6),		
-        keras.layers.Dense(units=1, activation="linear")
+    ann_model = keras.models.Sequential([
+        keras.layers.Dense(units=train_x.shape[1], activation="linear"),
+        keras.layers.Dense(units=30, activation="tanh"),
+        keras.layers.Dense(units=1, activation="sigmoid")
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
 
-    lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    optimizer = keras.optimizers.SGD(learning_rate=0.1, momentum=0.7)
 
-    return lstm_model
+    ann_model.compile(loss='mean_squared_error', optimizer=optimizer)
+    ann_model.fit(train_x, train_y, epochs=epochs, verbose=0, callbacks=[print_train_progress_callback])
+
+    return ann_model
 
 
-def forecast_lstm_model(model, test_x):
+def forecast_ann_model(model, test_x):
     """Forecasts future values using a model and test input dataset.
 
     Args:
@@ -67,26 +67,27 @@ def forecast_lstm_model(model, test_x):
     predictions = []
 
     test_len = test_x.shape[0]
-    test_timesteps = test_x.shape[1]
-    test_features = test_x.shape[2]
+    test_timesteps = 1
+    test_features = test_x.shape[1]
 
     # Make a separate prediction for each test data window in the test dataset
     for i in range(test_len):
         curr_progress = round(((i + 1) / test_len) * 100, 2)
         print(f'Prediction Progress: {curr_progress} %', end='\r')
 
-        model_input = (test_x[i, :, :]).reshape(1, test_timesteps, test_features)
+
+        model_input = np.reshape(test_x[i], (1, test_x.shape[1]))
         prediction = model.predict(model_input)
         # the prediction has a shape of (1, timesteps, 1)
         # only need to get the last prediction value
-        predictions.append(prediction[0, -1, 0])
+        predictions.append(prediction[-1])
     print()
 
     predictions = (np.array(predictions)).flatten()
     return predictions
 
 
-def get_lstm_model_perf(predictions, actuals):
+def get_ann_model_perf(predictions, actuals):
     """Calculates performance metrics of a model given its predictions
     and actual future values.
 
@@ -101,14 +102,14 @@ def get_lstm_model_perf(predictions, actuals):
     predictions_len = len(predictions)
 
     # calculate number of total actual upward and downward directions
-    total_ups = sum([1 if actuals[i] >= 0 else 0 for i in range(len(actuals))])
+    total_ups = sum([1 if actuals[i] >= 0.5 else 0 for i in range(len(actuals))])
     total_downs = len(actuals) - total_ups
 
     # calculate true positives, true negatives, false positives, and false negatives
-    tp = sum([1 if (predictions[i] >= 0 and actuals[i] >= 0) else 0 for i in range(predictions_len)])
-    tn = sum([1 if (predictions[i] < 0 and actuals[i] < 0) else 0 for i in range(predictions_len)])
-    fp = sum([1 if (predictions[i] >= 0 and actuals[i] < 0) else 0 for i in range(predictions_len)])
-    fn = sum([1 if (predictions[i] < 0 and actuals[i] >= 0) else 0 for i in range(predictions_len)])
+    tp = sum([1 if (predictions[i] >= 0.5 and actuals[i] >= 0.5) else 0 for i in range(predictions_len)])
+    tn = sum([1 if (predictions[i] < 0.5 and actuals[i] < 0.5) else 0 for i in range(predictions_len)])
+    fp = sum([1 if (predictions[i] >= 0.5 and actuals[i] < 0.5) else 0 for i in range(predictions_len)])
+    fn = sum([1 if (predictions[i] < 0.5 and actuals[i] >= 0.5) else 0 for i in range(predictions_len)])
 
     # calculate directional accuracy, upward directional accuracy, and downward directional accuracy
     da = (tp + tn) / (tp + tn + fp + fn)
@@ -149,118 +150,21 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
     test_y_copy = copy.deepcopy(test_y)
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100)
+    ann_model = make_ann_model(train_x_copy, train_y_copy, epochs=5000)
 
     # get the model predictions
-    predictions = forecast_lstm_model(lstm_model, test_x_copy)
+    predictions = forecast_ann_model(ann_model, test_x_copy)
 
     # test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
-    test_y_copy = np.array([test_y_copy[i, -1] for i in range(len(test_y_copy))])
-
-    # revert the normalization scalings done
-    test_y_copy = inverse_transform_data(test_y_copy, scaler, col_names, feature="log_return")
-    predictions = inverse_transform_data(predictions, scaler, col_names, feature="log_return")
+    test_y_copy = np.array(test_y_copy)
 
     # get model performance statistics
-    perf = get_lstm_model_perf(predictions, test_y_copy)
+    perf = get_ann_model_perf(predictions, test_y_copy)
+
+    print([1 if i >=0.5 else 0 for i in predictions[:10]])
+    print(test_y_copy[:10])
 
     return perf, test_y_copy, predictions
-
-
-
-def feature_selection(stock_ticker, time_steps, repeats=10):
-    
-    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
-    num_features = len(features)
-    dropped_features = features.copy()
-
-    print("===================================================")
-    print("Starting Feature Selection...")
-    print(f"Round 0/{num_features}")
-    print(f"Features Tested: 0/{num_features} (current features: [])")
-    
-
-    model_perfs = []
-
-    scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
-    validation_len = train_x.shape[0] * 25 // 100
-
-    adjusted_train_x = train_x[:-validation_len]
-    adjusted_train_y = train_y[:-validation_len]
-    validation_x = train_x[-validation_len:]
-    validation_y = train_y[-validation_len:]
-
-    for _ in range(repeats):
-        curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
-        model_perfs.append(curr_model_perf['da'])
-
-    curr_best_da = mean(model_perfs)
-    
-    print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
-    print(f"Dropped Features: {dropped_features}")
-    print("===================================================")
-
-    added_features = []
-    curr_mean_model_perfs = [0] * (len(features) + 1)
-    curr_mean_model_perfs[0] = curr_best_da
-
-    for test_round in range(num_features):
-
-        prev_round_best_da = curr_best_da
-
-        for index, feature in enumerate(features):
-
-            if feature in added_features:
-                continue
-
-            added_features.append(feature)
-
-            print(f"Round {test_round + 1}/{num_features}")
-            print(f"Features Tested: {index + 1}/{num_features} (current features: {added_features})")
-
-            model_perfs = []
-
-            dropped_features = features.copy()
-            for added_feature in added_features:
-                dropped_features.remove(added_feature)
-            
-            scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
-            print(col_names)
-            validation_len = train_x.shape[0] * 25 // 100
-
-            adjusted_train_x = train_x[:-validation_len]
-            adjusted_train_y = train_y[:-validation_len]
-            validation_x = train_x[-validation_len:]
-            validation_y = train_y[-validation_len:]
-
-            for _ in range(repeats):
-                curr_model_perf, _, _ = experiment(scaler, col_names, adjusted_train_x, adjusted_train_y, validation_x, validation_y)
-                model_perfs.append(curr_model_perf['da'])
-
-            curr_da = mean(model_perfs)
-            curr_mean_model_perfs[index + 1] = curr_da
-
-            if curr_da > curr_best_da:
-                curr_best_da = curr_da
-
-            added_features.remove(feature)
-
-            print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
-            print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
-            print("===================================================")
-
-        if curr_best_da <= prev_round_best_da:
-            break
-
-        curr_best_feature_index = curr_mean_model_perfs.index(curr_best_da) - 1
-        added_features.append(features[curr_best_feature_index])
-
-    dropped_features = features.copy()
-    for added_feature in added_features:
-        dropped_features.remove(added_feature)
-
-    return dropped_features
-
 
 
 def main():
@@ -268,17 +172,28 @@ def main():
     stock_ticker = 'AP'
 
     # parameters of each model
-    time_steps = 20
+    time_steps = 1
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
     dropped_features = None
-    #['wr', 'cmf', 'rsi', 'adx', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
-    
+
+    train_x = np.reshape(train_x, (train_x.shape[::2]))
+    train_y = np.reshape(train_y, (train_y.shape[0]))
+    test_x = np.reshape(test_x, (test_x.shape[::2]))
+    test_y = np.reshape(test_y, (test_y.shape[0]))
+
+    train_y = inverse_transform_data(train_y, scaler, col_names, feature="log_return")
+    test_y = inverse_transform_data(test_y, scaler, col_names, feature="log_return")
+
+    train_y = np.array([1 if i >= 0 else 0 for i in train_y])
+    test_y = np.array([1 if i >= 0 else 0 for i in test_y])
+
     print("===================================================")
     performances = []
 
