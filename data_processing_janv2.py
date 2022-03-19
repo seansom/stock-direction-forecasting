@@ -1,21 +1,27 @@
 import pandas as pd
 import numpy as np
+import tensorflow as tf
+import datetime, requests, json, math, shelve, sys, os, re, pathlib
+
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
-import datetime, requests, json, math, sys, os
+from eventregistry import *
+from statistics import mean
 
 #get_technical_data START
 def get_dates_five_years(testing=False):
     """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
+
     Args:
         testing (bool, optional): If set to true, always returns ('2017-02-13', '2022-02-11'). Defaults to False.
+
     Returns:
         tuple: (from_date, to_date)
     """
 
     if testing:
-        return ('2021-02-13', '2022-02-11')
+        return ('2017-02-13', '2022-02-11')
 
     # generate datetime objects
     date_today = datetime.datetime.now()
@@ -39,8 +45,10 @@ def get_trading_dates(stock_ticker, date_range, token):
 
 def get_technical_indicators(data):
     """Computes for log stock returns and technical indicators unavailable to EOD (e.g., A/D, CMF, WR).
+
     Args:
         data (pd.Dataframe): Dataframe containing dates and OHLCV stock data from EOD.
+
     Returns:
         pd.Dataframe: Dataframe containing dates, log stock returns and technical indicators.
     """    
@@ -125,6 +133,7 @@ def get_technical_indicators(data):
 
 def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, date_range):
     """Gets daily technical indicator data from EOD API.
+
     Args:
         indicator (str): The indicator for use in EOD API calls. (e.g., rsi)
         period (str): The period used in computing the technical indicator.
@@ -132,10 +141,12 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         exchange (str): The stock exchange where the stock is being traded (e.g., PSE)
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+
     Raises:
         Exception: Raises exception whenever gathered indicator data is insufficient to cover the specified
         date range. This may be fixed by increasing the timedelta used in computing the adjusted_first_day variable
         within the function.
+
     Returns:
         pd.Dataframe: Dataframe containing dates and specified technical indicator data
     """
@@ -245,12 +256,6 @@ def get_technical_data(stock_ticker, date_range):
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
-
-    # linearly scale up/down indicators to avoid power transform errors
-    # for indicator in data.columns:
-    #     if indicator != 'date':
-    #         scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
-    #         data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor))))
 
     return data
 #get_technical_data END
@@ -558,11 +563,324 @@ def get_fundamental_data(stock_ticker, date_range):
     return fundamental_data
 #get_fundamental_data END
 
+#get_sentimental_data START
+def get_dates_between(start_date, end_date):
+    """Returns a list of dates in yyyy-mm-dd format between two given dates.
+
+    Args:
+        start_date (str): The starting date.
+        end_date (str): The ending date.
+
+    Returns:
+        list: A list of date strings.
+    """
+
+    # convert date strings into datetime objects then set current date to 1 day after start_date
+    start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+    end_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+    curr_date = start_date + datetime.timedelta(days=1)
+
+    date_list = []
+    while curr_date < end_date:
+        date_list.append(curr_date.strftime('%Y-%m-%d'))
+        curr_date += datetime.timedelta(days=1)
+    
+    return date_list
+
+def clean_text(text):
+    """Cleans an input text (sentence).
+
+    Args:
+        text (str): The text to be cleaned.
+
+    Returns:
+        string: The cleaned text.
+    """
+
+    # remove all non-letters (punctuations, numbers, etc.)
+    processed_text = re.sub("[^a-zA-z]", " ", text)
+    # remove single characters
+    processed_text = re.sub(r"\s+[a-zA-z]\s+", " ", processed_text)
+    # remove multiple whitespaces
+    processed_text = re.sub(r"\s+", " ", processed_text)
+    
+    return processed_text
+
+def text_to_int(vocab, texts, max_seq_length):
+    """Converts a set of texts (sentences) into their numerical representations.
+
+    Args:
+        vocab (dict): A dictionary with words as keys and their integer equivalent as values.
+        texts (list): The list of texts (sentences) to be converted.
+        max_seq_length (int): The length of the longest sentence during model building.
+
+    Returns:
+        list: A list of lists wherein each element represents the numerical representation of a specific text (sentence).
+    """
+
+    sequences = []
+    for text in texts:
+        text_list = text.split()
+        sequence = []
+        for word in text_list:
+            # words not in the dictionary will have a value of 0
+            if word not in vocab:
+                sequence.append(0)
+            else:
+                sequence.append(vocab[word])
+
+            # truncate sentences longer than max_seq_length
+            if len(sequence) == max_seq_length:
+                break
+
+        sequences.append(sequence)
+    
+    return sequences
+
+def load_json_to_dict(path_file_name):
+    """Loads a json file to a dictionary.
+
+    Args:
+        path_file_name (str): The json file name or the path to it.
+
+    Returns:
+        dict: A dictionary that contains the json file contents.
+    """
+
+    file = open(path_file_name, "r")
+    data = json.loads(file.read())
+    file.close()
+
+    return data
+
+def get_news(stock_ticker, date_range, historical=False):
+    """Gets news data from News API.
+
+    Args:
+        stock_ticker (str): The stock ticker being examined (e.g., BPI).
+        date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+        historical (bool, optional): If set to true, access historical news data. Defaults to False.
+
+    Returns:
+        dict: A dictionary with dates as keys and the corresponding news headlines as values.
+    """
+
+    # related terms for each stock ticker (will be updated in the future to include all stocks in PSE)
+    ticker_terms = {
+        "ALI": ["Ayala Land"],
+        "AP": ["Aboitiz Power"],
+        "BPI": ["BPI", "Bank of the Philippine Islands"],
+        "JFC": ["Jollibee Foods", "Jollibee"],
+        "MER": ["Meralco", "Manila Electric Company"],
+        "PGOLD": ["Puregold"],
+        "SM": ["SM Investments"],
+        "TEL": ["PLDT"]
+        }
+
+    if historical:
+        with open('keys/News_API_paid_key.txt') as file:
+            token = file.readline()
+
+        er = EventRegistry(apiKey=token, allowUseOfArchive=True)
+    else:
+        with open('keys/News_API_free_key.txt') as file:
+            token = file.readline()
+
+        er = EventRegistry(apiKey=token, allowUseOfArchive=False)
+    
+    q = QueryArticlesIter(
+        keywords=QueryItems.OR(ticker_terms[stock_ticker]),
+        dateStart=date_range[0],
+        dateEnd=date_range[1],
+        sourceLocationUri=er.getLocationUri("Philippines"),
+        keywordsLoc="body,title",
+        ignoreKeywords=QueryItems.OR(["PBA", "basketball"]),
+        ignoreCategoryUri=er.getCategoryUri("Sports"),
+        isDuplicateFilter="skipDuplicates",
+        hasDuplicateFilter="skipHasDuplicates"
+        )
+
+    news_dict = dict()
+    curr_date_news = []
+    count = 0
+    for article in q.execQuery(er, sortBy="date", sortByAsc=True, maxItems=q.count(er)):
+        date = article["date"]
+        title = article["title"]
+        if count == 0:
+            curr_date = date
+            count += 1
+            curr_date_news.append(title)
+            continue
+        if date == curr_date:
+            curr_date_news.append(title)
+            continue
+        news_dict[curr_date] = curr_date_news
+        curr_date_news = []
+        curr_date = date
+        curr_date_news.append(title)
+
+    news_dict[curr_date] = curr_date_news
+
+    return news_dict
+
+def get_score(news, vocab, model, max_seq_length):
+    """Computes for the average score of a set of news headlines.
+
+    Args:
+        news (list): A list of news headlines to be scored.
+        vocab (dict): A dictionary with words as keys and their integer equivalent as values.
+        model (keras.Sequential): The best performing sentiment model to be used for scoring.
+        max_seq_length (int): The length of the longest sentence during model building.
+
+    Returns:
+        np.float32: The average score.
+    """
+
+    # clean headlines
+    clean_headlines = []
+    for headline in news:
+        clean_headline = clean_text(headline)
+        clean_headlines.append(clean_headline.lower())
+
+    # convert into their numerical representations    
+    sequences = text_to_int(vocab, clean_headlines, max_seq_length)
+    sequences = tf.keras.preprocessing.sequence.pad_sequences(sequences, maxlen = max_seq_length, padding = "post")
+    sequences = np.array(sequences)
+
+    # score each headline
+    scores = []
+    for sequence in sequences:
+        prob_dist = model.predict(sequence.reshape(1, max_seq_length))[0]
+        score = prob_dist[2] - prob_dist[0]
+        scores.append(score)
+
+    return mean(scores)
+
+def get_sentimental_data (stock_ticker, date_range):
+    """Computes and/or access sentimental data for a specific stock. To be used for model training.
+
+    Args:
+        stock_ticker (str): The stock ticker being examined (e.g., BPI).
+        date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+
+    Returns:
+        pd.Dataframe: Dataframe representing the sentiment indicators.
+    """
+
+    # get trading days
+    with open('keys/EOD_API_key.txt') as file:
+        token = file.readline()
+    trading_days = list(get_trading_dates(stock_ticker, date_range, token))
+
+    # set max_seq_length equal to the value used during model building
+    max_seq_length = 50
+    # load vocab constructed during model building
+    vocab = load_json_to_dict("sentiment data/vocab.json")
+    # load the best performing model in terms of accuracy
+    model = tf.keras.models.load_model("best sentiment model")
+
+    # prepare path/file name of scores file
+    scores_path = "sentiment data/" + str(stock_ticker) + "/monthly_updated_scores.csv"
+    scores_file = pathlib.Path(scores_path)
+
+    # for when a file containing sentiment scores for a given stock is already present
+    if scores_file.exists():
+        scores = pd.read_csv(scores_path)
+        dates_list = list(scores["date"])
+        sentiments_list = list(scores["sentiment"])
+        # for when the last trading day is within the date range of the scores file 
+        if trading_days[-1] <= dates_list[-1]:
+            dates = dates_list[dates_list.index(trading_days[0]):dates_list.index(trading_days[-1])+1]
+            sentiments = sentiments_list[dates_list.index(trading_days[0]):dates_list.index(trading_days[-1])+1]
+
+            return pd.DataFrame({"date": dates, "sentiment": sentiments})
+        # access additional news data through an API call up to 1 month old
+        else:
+            latest_news = get_news(stock_ticker, (dates_list[-1], date_range[1]), historical=False)
+
+            remaining_trading_days = trading_days[trading_days.index(dates_list[-1])+1:]
+            dates = dates_list[dates_list.index(trading_days[0]):]
+            sentiments = sentiments_list[dates_list.index(trading_days[0]):]
+
+            # score additional news
+            for i in range(len(remaining_trading_days)):
+                # days to be considered includes current trading day by default
+                # plus weekends if current trading day is Friday (i.e., get_dates_between returns 2 additional dates)
+                # and/or plus holiday/s if applicable
+                days_considered = []
+                curr_trading_day = remaining_trading_days[i]
+                dates.append(curr_trading_day)
+                days_considered.append(curr_trading_day)
+                if curr_trading_day != remaining_trading_days[-1]:
+                    days_considered = days_considered + get_dates_between(curr_trading_day, remaining_trading_days[i+1])
+                scores = []
+                for day in days_considered:
+                    # if date is not in dictionary, no news available so will have a score of 0
+                    if day not in latest_news:
+                        scores.append(np.float32(0))
+                    else:
+                        scores.append(get_score(latest_news[day], vocab, model, max_seq_length))
+                sentiments.append(mean(scores))
+            
+            return pd.DataFrame({"date": dates, "sentiment": sentiments})
+    
+    # for when a file containing sentiment scores for a given stock is not present (i.e., data for given stock is not yet in database)
+    else: 
+        # "guard" against unintentional call of paid News API 
+        message = "Historical news data for " + str(stock_ticker) + " not in database, continue with API call? ('Y' if yes, 'N' exits current execution): "
+        reply = input(message)
+        while (reply != "Y" and reply != "N"):
+            reply = input(message)
+        if reply == "N":
+            print("Exiting ...")
+            sys.exit()
+        
+        # access historical news data through an API call
+        news = get_news(stock_ticker, (date_range[0], date_range[1]), historical=True)
+        
+        # make directory for the new stock
+        path = "sentiment data/" + str(stock_ticker)
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+        # save historical news data as json inside created directory
+        news_path = "sentiment data/" + str(stock_ticker) + "/monthly_updated_news.json"
+        file = open(news_path, "w")
+        json.dump(news, file)
+        file.close()
+
+        # score news
+        dates = []
+        sentiments = []
+        for i in range(len(trading_days)):
+            days_considered = []
+            curr_trading_day = trading_days[i]
+            dates.append(curr_trading_day)
+            days_considered.append(curr_trading_day)
+            if curr_trading_day != trading_days[-1]:
+                days_considered = days_considered + get_dates_between(curr_trading_day, trading_days[i+1])
+            scores = []
+            for day in days_considered:
+                if day not in news:
+                    scores.append(np.float32(0))
+                else:
+                    scores.append(get_score(news[day], vocab, model, max_seq_length))
+            sentiments.append(mean(scores))
+
+        data = pd.DataFrame({"date": dates, "sentiment": sentiments})
+
+        data.to_csv(scores_path, index=False)
+
+        return data
+#get_sentimental_data END
+
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
+    
     Args:
         data (pd.DataFrame): The entire dataset.
+
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """	
@@ -579,8 +897,10 @@ def scale_data(data):
 def train_test_split(data):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
+
     Args:
         data (pd.DataFrame): The entire dataset.
+
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
@@ -592,9 +912,11 @@ def train_test_split(data):
 def transform_data(train, test):
     """Applies Yeo-Johnson transformation to train and test datasets. 
     Each column or feature in the dataset is standardized separately.
+
     Args:
         train (pd.DataFrame): The test dataset.
         test (pd.DataFrame): The train dataset.
+
     Returns:
         Yeo-Johnson transformed train and test datasets.
     """
@@ -634,12 +956,14 @@ def transform_data(train, test):
 def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     """Inverses scaling done through Yeo-Johnson transformation. To be used
     with the predicted stock returns of the direction forecasting model.
+
     Args:
         data (np.array): The array representing scaled data.
         scaler (PowerTransformer): The scaler used to scale data.
         col_names (list): The list of the column names of the initaial dataset.
         feature (str, optional): The single feature to invert scaling. 
         Defaults to "Stock Returns".
+
     Returns:
         np.array: The array representing the unscaled data.
     """    
@@ -650,12 +974,15 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data):
+def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
+
     Args:
         technical_data (pd.DataFrame): The dataset containing technical indicators.
         fundamental_data (pd.DataFrame): The dataset containing fundamental indicators.
+        sentimental_data (pd.DataFrame): The dataset containing sentiment indicators.
+
     Returns:
         scaler, PowerTransformer: Scaler used in the power transform
         train, pd.DataFrame: The processed train dataset.
@@ -663,24 +990,30 @@ def data_processing(technical_data, fundamental_data):
         col_names, list: List of column names in the train and test datasets
     """	
     data = technical_data.join(fundamental_data.set_index('date'), on='date')
+    data = data.join(sentimental_data.set_index('date'), on='date')
     data.dropna(inplace=True)
     data.reset_index(drop=True, inplace=True)
-    
+
     #remove date column
     data.drop(columns='date', inplace=True)
-    data.to_csv('data.csv')
 
+    if drop_col is not None:
+        data.drop(columns=drop_col, inplace=True)
+
+    # raise exception if missing/null value is found in the combined dataset
+    if data.isnull().values.any():
+        raise Exception(f'Null value found in combined dataset.')
+    
     #scale data
     scaled_data = scale_data(data)
-    scaled_data.to_csv('scaled_data.csv')
 
     #split data into train and test
-    train, test = train_test_split(scaled_data)
+    train_raw, test = train_test_split(scaled_data)
     
     #apply Yeo-Johnson Power Transfrom
-    scaler, train, test, col_names = transform_data(train, test)
+    scaler, train, test, col_names = transform_data(train_raw, test)
 
-    return scaler, train, test, col_names
+    return scaler, train_raw, train, test, col_names
 
 
 def make_data_window(train, test, time_steps=1):
@@ -692,11 +1025,13 @@ def make_data_window(train, test, time_steps=1):
     and a timestep of 2, the resulting _x dataset will be
     [[[1, 2], [3, 4]], [[3, 4], [5, 6]]] while the resulting _y
     dataset will be [5, 7].
+
     Args:
         train (pd.DataFrame): The train dataset.
         test (pd.DataFrame): The test dataset.
         time_steps (int, optional): How many time steps should
         be in each data window. Defaults to 1.
+
     Returns:
         pd.DataFrame (4): The train_x, train_y, test_x, and test_y datasets.
     """	
@@ -732,16 +1067,66 @@ def make_data_window(train, test, time_steps=1):
     test_x = np.array(test_x)
     test_y = np.array(test_y)
 
-    return train_x, train_y, test_x, test_y
+    return train, train_x, train_y, test_x, test_y
 #data_processing END
 
+
+def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
+    if date_range == None:
+        date_range = get_dates_five_years(testing=True)
+
+    os.chdir('data')
+
+    # reset database if it gets too large (current max size = 20 MB)
+    if os.path.exists('stock_database.dat') and os.path.getsize('stock_database.dat') > 20000000:
+        os.remove('stock_database.bak')
+        os.remove('stock_database.dat')
+        os.remove('stock_database.dir')
+
+    # open stock_database to see if data was already collected from API
+    # otherwise, get data from API and store it in database
+    stock_database = shelve.open('stock_database')
+    stock_database_key = f"{stock_ticker} {date_range}"
+
+    if stock_database_key in stock_database:
+        technical_data = stock_database[stock_database_key]['technical_data']
+        fundamental_data = stock_database[stock_database_key]['fundamental_data']
+
+    else:
+        os.chdir('..')
+        technical_data = get_technical_data(stock_ticker, date_range)
+        fundamental_data = get_fundamental_data(stock_ticker, date_range)
+        os.chdir('data')
+
+        stock_database[stock_database_key] = {
+            'technical_data' : technical_data,
+            'fundamental_data' : fundamental_data
+        }
+        
+    stock_database.close()
+    os.chdir('..')
+
+    # get sentimental data
+    # has its own database (sentiment data folder) and is handled within the function itself
+    sentimental_data = get_sentimental_data(stock_ticker, date_range)
+
+    scaler, train_raw, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col)
+    train, train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
+
+    return scaler, col_names, train_raw, train, train_x, train_y, test_x, test_y
+
+
 def main():
-    stock_ticker = 'BPI'
-    scaler, train, test, col_names = data_processing(get_technical_data(stock_ticker, get_dates_five_years(testing=True)), get_fundamental_data(stock_ticker, get_dates_five_years(testing=True)))
-    print(train, test)
-    print(type(scaler))
-    train_x, train_y, test_x, test_y = make_data_window(train, test)
+    stock_ticker = 'AP'
+    scaler, col_names, train, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=['psei_returns'])
+
+    # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    print(col_names)
+
+    print(train_x.shape)
+
+    print(train_x, test_y)
+
 
 if __name__ == '__main__':
-    # main()
-    print(get_fundamental_data('AP', get_dates_five_years(testing=True)))
+    main()
