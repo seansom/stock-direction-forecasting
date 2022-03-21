@@ -1,4 +1,4 @@
-#added shitton of indicators
+#added shitton of indicators, single timestep target windows
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -66,15 +66,8 @@ def get_technical_indicators(data):
     # compute log stock returns
     stock_returns = [np.NaN]
     for i in range(1, data_len):
-        stock_return = math.log(Decimal(close[i]) / Decimal(close[i - 1]))
+        stock_return = ((Decimal(close[i]) - Decimal(close[i - 1])) / Decimal(close[i - 1]))
         stock_returns.append(stock_return)
-
-    open_price = data['open']
-    intraday_returns = []
-    for i in range(data_len):
-        intraday_return = math.log(Decimal(close[i]) / Decimal(open_price[i]))
-        intraday_returns.append(intraday_return)
-
 
     # compute A/D indicator values
     ad = []
@@ -170,7 +163,6 @@ def get_technical_indicators(data):
     technical_indicators = pd.DataFrame({
         'date': data['date'],
         'log_return': stock_returns,
-        'intraday_return' : intraday_returns,
         'ad' : ad,
         'wr14' : wr14,
         'wr5' : wr5,
@@ -304,7 +296,7 @@ def get_technical_data(stock_ticker, date_range):
         data = data.merge(indicator_data, on='date')
 
     # remove unneeded features/columns in dataframe
-    # data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close', 'volume'])
+    data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
@@ -1069,30 +1061,25 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
 
     # FEATURE SELECTION START
 
-    stock_returns_index = train_test_sets[0][0].columns.get_loc("log_return")
-
     feature_selection_train_x = train_test_sets[0][0].to_numpy()[:-1]
-    feature_selection_train_y = train_test_sets[0][0].to_numpy()[1:, stock_returns_index]
+    feature_selection_train_y = train_test_sets[0][0].to_numpy()[1:, 0]
 
     correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
-    correlations = [round(abs(i), 6) for i in correlations]
+    correlations = [round(abs(i), 3) for i in correlations]
 
-    # print(correlations)
+    correlations = [1 if i >= 0.1 else 0 for i in correlations]
 
-    # correlations = [1 if i >= mean(correlations) else 0 for i in correlations]
-
-    # col_names = list(train_test_sets[0][0])
+    col_names = list(train_test_sets[0][0])
 
     # print(correlations)
     # print(col_names)
 
-    # dropped_features = []
+    dropped_features = []
     
-    # for index, value in enumerate(correlations):
-    #     if not value and col_names[index] != 'log_return':
-    #         dropped_features.append(col_names[index])
+    for index, value in enumerate(correlations):
+        if not value and col_names[index] != 'log_return':
+            dropped_features.append(col_names[index])
 
-    # print('======')
     # print(dropped_features)
 
     # FEATURE SELECTION END
@@ -1109,8 +1096,7 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
             'scaler' : scaler,
             'train' : train,
             'test' : test,
-            'col_names' : col_names,
-            'correlations' : correlations
+            'col_names' : col_names
         })
 
     return processed_train_test_sets
@@ -1151,16 +1137,17 @@ def make_data_window(train, test, time_steps=1):
 
     for i in range(time_steps, train_len):
         train_x.append([train[j, :] for j in range(i - time_steps, i)])
-        train_y.append([train[j, stock_returns_index] for j in range(i - time_steps + 1, i + 1)])
+        train_y.append([train[i, stock_returns_index]])
 
     for i in range(time_steps, test_len):
         test_x.append([test[j, :] for j in range(i - time_steps, i)])
-        test_y.append([test[j, stock_returns_index] for j in range(i - time_steps + 1, i + 1)])
+        test_y.append([test[i, stock_returns_index]])
 
     train_x = np.array(train_x)
     train_y = np.array(train_y)
     test_x = np.array(test_x)
     test_y = np.array(test_y)
+
 
     return train_x, train_y, test_x, test_y
 #data_processing END
@@ -1215,7 +1202,6 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
         windowed_train_test_sets.append({
             'scaler' : train_test_set['scaler'],
             'col_names' : train_test_set['col_names'],
-            'correlations' : train_test_set['correlations'],
             'train_x' : train_x,
             'train_y' : train_y,
             'test_x' : test_x,
@@ -1226,8 +1212,10 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
 
 
 def main():
-    stock_ticker = 'ALI'
+    stock_ticker = 'MER'
     windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=1004, test_size=21, drop_col=None)
+
+    # sys.exit()
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(windowed_train_test_sets[0]['col_names'])
@@ -1240,6 +1228,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-
     # data = get_technical_data('AP', get_dates_five_years(testing=True))
     # print(list(data))

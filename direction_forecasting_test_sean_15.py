@@ -1,11 +1,11 @@
-# no random splitting with shuffling, modified val split, uses sentiment data
+# no random splitting with shuffling, modified val split, uses sentiment data (shitton indicators)
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean_4 import get_dataset, inverse_transform_data
+from data_processing_test_sean_10 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -47,12 +47,12 @@ def make_lstm_model(train_x, train_y, epochs=100):
         keras.layers.Dense(units=1, activation='linear')
     ])
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=8, mode='min', restore_best_weights=True)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
 
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.1111,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -172,10 +172,22 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
 
 def feature_selection(stock_ticker, time_steps, repeats=5):
+
+    scaler, col_names, correlations, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
+    validation_len = train_x.shape[0] * 25 // 100
     
-    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    features = col_names.copy()
+
+    stock_returns_index = features.index('log_return')
+    features.remove('log_return')
+    correlations.pop(stock_returns_index)
+
+    features = [x for _, x in sorted(zip(correlations, features), reverse=True)]
+
     num_features = len(features)
-    dropped_features = []
+    dropped_features = features.copy()
+
+
 
     print("===================================================")
     print("Starting Feature Selection...")
@@ -184,9 +196,6 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
     
 
     model_perfs = []
-
-    scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps)
-    validation_len = train_x.shape[0] * 25 // 100
 
     validation_x = train_x[-validation_len:]
     validation_y = train_y[-validation_len:]
@@ -231,7 +240,7 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
 
             model_perfs = []
             
-            scaler, col_names, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=(dropped_features if dropped_features else None))
+            scaler, col_names, correlations, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=(dropped_features if dropped_features else None))
 
             validation_x = train_x[-validation_len:]
             validation_y = train_y[-validation_len:]
@@ -274,7 +283,7 @@ def feature_selection(stock_ticker, time_steps, repeats=5):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'ALI'
+    stock_ticker = 'MER'
 
     # parameters of each model
     time_steps = 20
@@ -284,11 +293,11 @@ def main():
     repeats = 2
 
     # dropped features
-    dropped_features =  ['gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns']
+    dropped_features =  None
     # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
+    scaler, col_names, correlations, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
 
     shuffled_train_indices = list(range(train_x.shape[0]))
     random.seed(0)

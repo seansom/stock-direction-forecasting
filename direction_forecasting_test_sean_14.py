@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean_8 import get_dataset, inverse_transform_data
+from data_processing_test_sean_9 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -27,15 +27,15 @@ class CustomCallback(keras.callbacks.Callback):
 def make_lstm_model(input_shape):
 
     lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2),
-        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2),
-        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2),
+        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.6),
+        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.6),
+        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.6),
 
         keras.layers.Dense(units=16, activation='linear'),
         keras.layers.Dense(units=1, activation='linear')
     ])
 
-    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    optimizer = keras.optimizers.Adam()
     lstm_model.compile(loss='mean_squared_error', optimizer=optimizer)
 
     return lstm_model
@@ -146,8 +146,6 @@ def experiment(data):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
-    curr_directional_accuracy = 0
-
     for index in range(data_len):
 
         print(f'Round {index + 1}/{data_len}')
@@ -165,11 +163,10 @@ def experiment(data):
         shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
         shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
-        # if curr_directional_accuracy < 0.6:
         lstm_model.set_weights(lstm_weights)
         lstm_model.reset_states()
 
-        lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+        lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.1, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
         curr_predictions = forecast_lstm_model(lstm_model, test_x)
         curr_actuals = np.array([test_y[i, -1] for i in range(len(test_y))])
@@ -286,18 +283,10 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
     data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=None)
 
     features = data[0]['col_names'].copy()
-    correlations = data[0]['correlations'].copy()
-
-    stock_returns_index = features.index('log_return')
     features.remove('log_return')
-    correlations.pop(stock_returns_index)
-
-    features = [x for _, x in sorted(zip(correlations, features), reverse=True)]
 
     num_features = len(features)
     dropped_features = features.copy()
-
-    data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=dropped_features)
 
     print("===================================================")
     print("Starting Feature Selection...")
@@ -368,28 +357,27 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
 
 
 
-
 def main():
     # stock to be predicted
-    stock_ticker = 'SM'
+    stock_ticker = 'ALI'
 
     # parameters of each model
-    time_steps = 50
+    time_steps = 100
     train_size = 1004
-    test_size = 21
+    test_size = 42
 
     # how many models built (min = 2)
-    repeats = 20
+    repeats = 2
 
     # dropped features
-    dropped_features = None
+    dropped_features = None#['volume', 'cmf20', 'cmf5', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
     # AP (1, 1004, 21) ['wr', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'p/e', 'psei_returns', 'sentiment']
     # ALI (1, 1004, 21) ['volume', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'sentiment']
     # PGOLD (1, 1004, 21) ['ad', 'wr', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'mband', 'lband', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
     # BPI (1, 1004, 21) ['cmf20', 'cmf5', 'atr14', 'adx14', 'k_values_x', 'signal', 'divergence', 'slope2', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
-    ['cmf5', 'volume', 'lband', 'p/e', 'close', 'adjusted_close', 'mband', 'open', 'high', 'low', 'uband', 'k_values_y', 'k_values_x', 'd_values_y', 'd_values_x', 'macd26', 'rsi14', 'rsi5', 'cmf20', 'atr5', 'roe', 'real_interest_rate', 'signal', 'slope2', 'sentiment', 'slope5', 'adx14', 'cci20', 'cci5', 'gdp', 'adx5', 'inflation', 'psei_returns', 'atr14', 'slope3', 'eps']
+    ['volume', 'wr5', 'cmf20', 'cmf5', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
     # ALL ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
@@ -448,7 +436,7 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
+    main()
 
-    pruned_features = simple_feature_selection('ALI', 20, 1004, 21, repeats=6)
-    print(f"Dropped Features: {pruned_features}")
+    # pruned_features = simple_feature_selection('ALI', 1, 1004, 21, repeats=20)
+    # print(f"Dropped Features: {pruned_features}")

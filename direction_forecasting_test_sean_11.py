@@ -265,7 +265,7 @@ def main():
     stock_ticker = 'ALI'
 
     # parameters of each model
-    time_steps = 50
+    time_steps = 1
     epochs = 100
 
     # how many models built (min = 2)

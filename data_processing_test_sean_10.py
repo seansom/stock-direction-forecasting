@@ -1,4 +1,3 @@
-#added shitton of indicators
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -180,7 +179,6 @@ def get_technical_indicators(data):
 
     return technical_indicators
 
-
 def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, date_range):
     """Gets daily technical indicator data from EOD API.
 
@@ -304,7 +302,7 @@ def get_technical_data(stock_ticker, date_range):
         data = data.merge(indicator_data, on='date')
 
     # remove unneeded features/columns in dataframe
-    # data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close', 'volume'])
+    data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'volume', 'close'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
@@ -946,23 +944,21 @@ def scale_data(data):
     return data
 
 
-def train_test_split(data, time_steps, train_size, test_size):
+def train_test_split(data, time_steps):
+    """Splits a dataset into training and testing samples.
+    The train and test data are split with a ratio of 8:2.
 
-    train_test_sets = []
+    Args:
+        data (pd.DataFrame): The entire dataset.
 
-    data_len = data.shape[0]
-    train_test_sets_num = (data_len - time_steps - train_size) // test_size
-    shift_days = (data_len - time_steps - train_size) % test_size
+    Returns:
+        pd.DataFrame, pd.DataFrame: The train and test datasets.
+    """	
+    test_len = (data.shape[0] - time_steps) * 1 // 10
 
-    for i in range(train_test_sets_num):
+    train, test = data[:-test_len ], data[-test_len - time_steps:]
 
-        curr_train = data[i * test_size + shift_days : i * test_size + train_size + time_steps + shift_days]
-        curr_test = data[i * test_size + train_size + shift_days : (i + 1) * test_size + train_size + time_steps + shift_days]
-
-        train_test_sets.append([curr_train, curr_test])
-
-
-    return train_test_sets
+    return train, test
 
 
 def transform_data(train, test):
@@ -1030,8 +1026,7 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-
-def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, train_size, test_size, drop_col=None):
+def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col=None):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1060,60 +1055,27 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     # raise exception if missing/null value is found in the combined dataset
     if data.isnull().values.any():
         raise Exception(f'Null value found in combined dataset.')
+
+    # getting correlations START
+    stock_returns_index = data.columns.get_loc("log_return")
+
+    feature_selection_train_x = data.to_numpy()[:-1]
+    feature_selection_train_y = data.to_numpy()[1:, stock_returns_index]
+
+    correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
+    correlations = [round(abs(i), 6) for i in correlations]
+    # getting correlations END
     
     #scale data
     scaled_data = scale_data(data)
 
     #split data into train and test
-    train_test_sets = train_test_split(scaled_data, time_steps, train_size, test_size)
-
-    # FEATURE SELECTION START
-
-    stock_returns_index = train_test_sets[0][0].columns.get_loc("log_return")
-
-    feature_selection_train_x = train_test_sets[0][0].to_numpy()[:-1]
-    feature_selection_train_y = train_test_sets[0][0].to_numpy()[1:, stock_returns_index]
-
-    correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
-    correlations = [round(abs(i), 6) for i in correlations]
-
-    # print(correlations)
-
-    # correlations = [1 if i >= mean(correlations) else 0 for i in correlations]
-
-    # col_names = list(train_test_sets[0][0])
-
-    # print(correlations)
-    # print(col_names)
-
-    # dropped_features = []
+    train, test = train_test_split(scaled_data, time_steps)
     
-    # for index, value in enumerate(correlations):
-    #     if not value and col_names[index] != 'log_return':
-    #         dropped_features.append(col_names[index])
+    #apply Yeo-Johnson Power Transfrom
+    scaler, train, test, col_names = transform_data(train, test)
 
-    # print('======')
-    # print(dropped_features)
-
-    # FEATURE SELECTION END
-
-    # for train_test_set in train_test_sets:
-    #     train_test_set[0] = train_test_set[0].drop(columns=dropped_features)
-    #     train_test_set[1] = train_test_set[1].drop(columns=dropped_features)
-
-    processed_train_test_sets = []
-
-    for train, test in train_test_sets:
-        scaler, train, test, col_names = transform_data(train, test)
-        processed_train_test_sets.append({
-            'scaler' : scaler,
-            'train' : train,
-            'test' : test,
-            'col_names' : col_names,
-            'correlations' : correlations
-        })
-
-    return processed_train_test_sets
+    return scaler, train, test, col_names, correlations
 
 
 def make_data_window(train, test, time_steps=1):
@@ -1166,7 +1128,7 @@ def make_data_window(train, test, time_steps=1):
 #data_processing END
 
 
-def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test_size=5, drop_col=None):
+def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     if date_range == None:
         date_range = get_dates_five_years(testing=True)
 
@@ -1205,41 +1167,24 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    processed_train_test_sets = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, train_size, test_size, drop_col)
+    scaler, train, test, col_names, correlations = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
+    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
 
-    windowed_train_test_sets = []
-
-    for train_test_set in processed_train_test_sets:
-        train_x, train_y, test_x, test_y = make_data_window(train_test_set['train'], train_test_set['test'], time_steps)
-
-        windowed_train_test_sets.append({
-            'scaler' : train_test_set['scaler'],
-            'col_names' : train_test_set['col_names'],
-            'correlations' : train_test_set['correlations'],
-            'train_x' : train_x,
-            'train_y' : train_y,
-            'test_x' : test_x,
-            'test_y' : test_y
-        })
-
-    return windowed_train_test_sets
+    return scaler, col_names, correlations, train_x, train_y, test_x, test_y
 
 
 def main():
-    stock_ticker = 'ALI'
-    windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=1004, test_size=21, drop_col=None)
+    stock_ticker = 'AP'
+    scaler, col_names, correlations, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=60, drop_col=['psei_returns'])
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    print(windowed_train_test_sets[0]['col_names'])
+    print(col_names)
     sys.exit()
 
-    print(windowed_train_test_sets[0]['train_x'].shape, windowed_train_test_sets[0]['train_y'].shape)
+    print(train_x.shape, test_y.shape)
 
-    print(windowed_train_test_sets[0]['test_x'])
+    print(test_y)
 
 
 if __name__ == '__main__':
     main()
-
-    # data = get_technical_data('AP', get_dates_five_years(testing=True))
-    # print(list(data))
