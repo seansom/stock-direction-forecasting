@@ -304,7 +304,7 @@ def get_technical_data(stock_ticker, date_range):
         data = data.merge(indicator_data, on='date')
 
     # remove unneeded features/columns in dataframe
-    # data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close', 'volume'])
+    data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close', 'volume'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
