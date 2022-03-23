@@ -371,18 +371,20 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
 
 def main():
     # stock to be predicted
-    stock_ticker = 'SM'
+    stock_ticker = 'BPI'
 
     # parameters of each model
-    time_steps = 50
+    time_steps = 20
     train_size = 1004
     test_size = 21
 
     # how many models built (min = 2)
-    repeats = 20
+    repeats = 2
 
     # dropped features
     dropped_features = None
+    # ALI ['lband', 'p/e', 'mband', 'uband', 'wr5', 'k_values_y', 'k_values_x', 'd_values_y', 'd_values_x', 'macd26', 'rsi14', 'rsi5', 'cmf20', 'atr5', 'roe', 'signal', 'slope2', 'slope5', 'adx14', 'cci20', 'cci5', 'gdp', 'slope4', 'adx5', 'inflation', 'intraday_return', 'psei_returns', 'atr14', 'slope3', 'eps']
+    ['divergence', 'lband', 'p/e', 'mband', 'wr5', 'uband', 'wr14', 'k_values_x', 'd_values_y', 'd_values_x', 'rsi5', 'macd26', 'rsi14', 'ad', 'atr5', 'cmf20', 'real_interest_rate', 'sentiment', 'slope2', 'slope5', 'signal', 'gdp', 'cci5', 'adx14', 'slope4', 'adx5', 'intraday_return', 'atr14', 'inflation', 'psei_returns', 'slope3', 'eps']
 
     # AP (1, 1004, 21) ['wr', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'p/e', 'psei_returns', 'sentiment']
     # ALI (1, 1004, 21) ['volume', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'sentiment']
@@ -450,5 +452,5 @@ if __name__ == '__main__':
 
     # main()
 
-    pruned_features = simple_feature_selection('ALI', 20, 1004, 21, repeats=6)
+    pruned_features = simple_feature_selection('BPI', 20, 1004, 21, repeats=8)
     print(f"Dropped Features: {pruned_features}")
