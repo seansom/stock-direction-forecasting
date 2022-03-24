@@ -174,7 +174,7 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
 
 
-def simple_feature_selection(stock_ticker, time_steps, repeats=25):
+def forward_feature_selection(stock_ticker, time_steps, repeats=25):
     
     _, col_names, correlations, _, _, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
 
@@ -271,21 +271,122 @@ def simple_feature_selection(stock_ticker, time_steps, repeats=25):
 
     return dropped_features
 
+
+def backward_feature_selection(stock_ticker, time_steps, repeats=25):
+    
+    scaler, col_names, correlations, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
+
+    features = col_names.copy()
+
+    stock_returns_index = features.index('log_return')
+    features.remove('log_return')
+    correlations.pop(stock_returns_index)
+
+    features = [x for _, x in sorted(zip(correlations, features))]
+
+    num_features = len(features)
+    dropped_features = []
+
+    print("===================================================")
+    print("Starting Feature Selection...")
+    print(f"Features Tested: 0/{num_features} (current dropped features: [])")
+    
+    model_perfs = []
+
+    validation_len = train_x.shape[0] * 2 // 10
+
+    # adjusted_train_indices = list(range(train_x.shape[0] - validation_len))
+
+    adjusted_train_x = train_x[:-validation_len]
+    adjusted_train_y = train_y[:-validation_len]
+    validation_x = train_x[-validation_len:]
+    validation_y = train_y[-validation_len:]
+
+    shuffled_train_indices = list(range(adjusted_train_x.shape[0]))
+
+    random.seed(0)
+    random.shuffle(shuffled_train_indices)
+
+    shuffled_train_x = np.array([adjusted_train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([adjusted_train_y[i] for i in shuffled_train_indices])
+
+    for i in range(repeats):
+        print(f"Experiment {i + 1}/{repeats}")
+        curr_model_perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, validation_x, validation_y)
+        model_perfs.append(curr_model_perf['da'])
+
+    curr_best_da = round(mean(model_perfs), 6)
+    
+    print(f"Best Mean Directional Accuracy: {curr_best_da}")
+    print(f"Current Mean Directional Accuracy: {curr_best_da}")
+    print(f"Current Features: {features}")
+    print("===================================================")
+
+
+    for index, feature in enumerate(features):
+
+        dropped_features.append(feature)
+
+        print(f"Features Tested: {index + 1}/{num_features} (current dropped features: {dropped_features})")
+
+        model_perfs = []
+
+        scaler, col_names, correlations, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
+
+        adjusted_train_x = train_x[:-validation_len]
+        adjusted_train_y = train_y[:-validation_len]
+        validation_x = train_x[-validation_len:]
+        validation_y = train_y[-validation_len:]
+
+        shuffled_train_x = np.array([adjusted_train_x[i] for i in shuffled_train_indices])
+        shuffled_train_y = np.array([adjusted_train_y[i] for i in shuffled_train_indices])
+
+        for i in range(repeats):
+            print(f"Experiment {i + 1}/{repeats}")
+            curr_model_perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, validation_x, validation_y)
+            model_perfs.append(curr_model_perf['da'])
+
+        curr_mean_da = round(mean(model_perfs), 6)
+
+        if curr_mean_da >= curr_best_da:
+            curr_best_da = curr_mean_da
+        else:
+            dropped_features.remove(feature)
+
+        print(f"Best Mean Directional Accuracy: {curr_best_da}")
+        print(f"Current Mean Directional Accuracy: {curr_mean_da}")
+        print(f"Current Features: {[feature for feature in features if feature not in dropped_features]}")
+        print("===================================================")
+
+    added_features = [feature for feature in features if feature not in dropped_features]
+
+    print(f"Best Mean Directional Accuracy: {curr_best_da}")
+    print(f"Selected Features: {added_features}")
+    print(f"Dropped Features: {dropped_features}")
+    print("===================================================")
+
+    return dropped_features
+
 def main():
     # stock to be predicted
-    stock_ticker = 'BPI'
+    stock_ticker = 'AP'
 
     # parameters of each model
-    time_steps = 20
+    time_steps = 1
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = None#['volatility5', 'wr14', 'mband', 'k_values_y', 'k_values_x', 'uband', 'd_values_y', 'd_values_x', 'rsi14', 'macd26', 'slope2', 'slope4', 'cmf20', 'atr5', 'signal', 'cci5', 'slope3', 'adx5', 'adx14', 'sentiment', 'real_interest_rate', 'roe', 'gdp', 'inflation', 'atr14', 'psei_returns']
+    dropped_features = ['wr14', 'cmf20', 'atr14', 'adx14', 'k_values_x', 'd_values_x', 'slope2', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'k_values_y', 'd_values_y', 'real_interest_rate', 'roe']
+    # bpi forward ['slope4', 'cci5', 'slope5', 'rsi5', 'p/e', 'atr14', 'atr5', 'slope2', 'lband', 'mband', 'uband', 'sentiment', 'rsi14', 'divergence', 'adx14', 'cmf5', 'k_values_y', 'k_values_x', 'cci20', 'cmf20', 'inflation', 'ad', 'gdp', 'signal', 'd_values_x', 'slope14', 'real_interest_rate', 'roe', 'eps']
+    #['volatility5', 'wr14', 'mband', 'k_values_y', 'k_values_x', 'uband', 'd_values_y', 'd_values_x', 'rsi14', 'macd26', 'slope2', 'slope4', 'cmf20', 'atr5', 'signal', 'cci5', 'slope3', 'adx5', 'adx14', 'sentiment', 'real_interest_rate', 'roe', 'gdp', 'inflation', 'atr14', 'psei_returns']
     # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
 
     scaler, col_names, correlations, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features)
+
+    # print(col_names)
+    # sys.exit()
 
     shuffled_train_indices = list(range(train_x.shape[0]))
     random.seed(0)
@@ -348,5 +449,5 @@ if __name__ == '__main__':
 
     # main()
 
-    pruned_features = simple_feature_selection('ALI', 20, repeats=15)
+    pruned_features = backward_feature_selection('BPI', 1, repeats=10)
     print(f"Dropped Features: {pruned_features}")

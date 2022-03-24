@@ -1,5 +1,5 @@
-# no random splitting with shuffling, walk forward validation with SHITTON of indicators
-from tensorflow import keras, compat
+# no random splitting with shuffling, walk forward validation with SHITTON of indicators, Bidirectional LSTM version
+from tensorflow import keras, compat, shape
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
@@ -23,15 +23,39 @@ class CustomCallback(keras.callbacks.Callback):
         print()
 
 
+# Add attention layer to the deep learning network
+class attention(keras.layers.Layer):
+    def __init__(self,**kwargs):
+        super(attention,self).__init__(**kwargs)
+ 
+    def build(self,input_shape):
+        self.W = self.add_weight(name='attention_weight', shape=(input_shape[-1],1), initializer='random_normal', trainable=True)
+        self.b = self.add_weight(name='attention_bias', shape=(input_shape[1],1), initializer='zeros', trainable=True)        
+        super(attention, self).build(input_shape)
+ 
+    def call(self,x):
+        # Alignment scores. Pass them through tanh function
+        e = keras.backend.tanh(keras.backend.dot(x,self.W)+self.b)
+        # Remove dimension of size 1
+        e = keras.backend.squeeze(e, axis=-1)   
+        # Compute the weights
+        alpha = keras.backend.softmax(e)
+        # Reshape to tensorFlow format
+        alpha = keras.backend.expand_dims(alpha, axis=-1)
+        # Compute the context vector
+        context = x * alpha
+        context = keras.backend.sum(context, axis=1)
+        return context
+
 
 def make_lstm_model(input_shape):
 
     lstm_model = keras.models.Sequential([
-        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2),
-        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2),
-        keras.layers.LSTM(units=64, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2),
+        keras.layers.Bidirectional(keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2)),
+        keras.layers.Bidirectional(keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2)),
+        keras.layers.Bidirectional(keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2)),
 
-        keras.layers.Dense(units=16, activation='linear'),
+        keras.layers.Dense(units=64, activation='linear'),
         keras.layers.Dense(units=1, activation='linear')
     ])
 
@@ -136,9 +160,6 @@ def experiment(data):
     data_len = len(data)
     input_shape = data_copy[0]['train_x'].shape[1:]
 
-    lstm_model = make_lstm_model(input_shape)
-    lstm_weights = lstm_model.get_weights()
-
     predictions = []
     actuals = []
 
@@ -165,10 +186,7 @@ def experiment(data):
         shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
         shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
-        # if curr_directional_accuracy < 0.6:
-        lstm_model.set_weights(lstm_weights)
-        lstm_model.reset_states()
-
+        lstm_model = make_lstm_model(input_shape)
         lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
         curr_predictions = forecast_lstm_model(lstm_model, test_x)
@@ -371,12 +389,12 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
 
 def main():
     # stock to be predicted
-    stock_ticker = 'ALI'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 20
     train_size = 1004
-    test_size = 3
+    test_size = 21
 
     # how many models built (min = 2)
     repeats = 2
