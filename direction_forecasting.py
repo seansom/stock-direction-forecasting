@@ -1,5 +1,5 @@
 # random split with shuffling
-from tensorflow import keras
+from tensorflow import keras, compat
 from statistics import mean, stdev
 import keras_tuner as kt
 import numpy as np
