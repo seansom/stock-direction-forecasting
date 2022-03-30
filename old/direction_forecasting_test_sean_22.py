@@ -1,11 +1,11 @@
-# no random splitting with shuffling, walk forward validation with SHITTON of indicators, Bidirectional LSTM version
-from tensorflow import keras, compat, shape
+# walk forward binary classification version with data discretization, CNN-biLSTM implementation
+from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import os, sys, math, copy, random
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean_8 import get_dataset, inverse_transform_data
+from data_processing_test_sean_12 import get_dataset
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -17,50 +17,28 @@ class CustomCallback(keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
-        print(f'Training Progress: {curr_progress} %', end='\r')
+        print(f'Training Progress: {curr_progress} % (val_accuracy: {round(logs["val_binary_accuracy"], 6)})', end='\r')
 
     def on_train_end(self, logs=None):
         print()
 
 
-# Add attention layer to the deep learning network
-class attention(keras.layers.Layer):
-    def __init__(self,**kwargs):
-        super(attention,self).__init__(**kwargs)
- 
-    def build(self,input_shape):
-        self.W = self.add_weight(name='attention_weight', shape=(input_shape[-1],1), initializer='random_normal', trainable=True)
-        self.b = self.add_weight(name='attention_bias', shape=(input_shape[1],1), initializer='zeros', trainable=True)        
-        super(attention, self).build(input_shape)
- 
-    def call(self,x):
-        # Alignment scores. Pass them through tanh function
-        e = keras.backend.tanh(keras.backend.dot(x,self.W)+self.b)
-        # Remove dimension of size 1
-        e = keras.backend.squeeze(e, axis=-1)   
-        # Compute the weights
-        alpha = keras.backend.softmax(e)
-        # Reshape to tensorFlow format
-        alpha = keras.backend.expand_dims(alpha, axis=-1)
-        # Compute the context vector
-        context = x * alpha
-        context = keras.backend.sum(context, axis=1)
-        return context
-
 
 def make_lstm_model(input_shape):
 
     lstm_model = keras.models.Sequential([
-        keras.layers.Bidirectional(keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2)),
-        keras.layers.Bidirectional(keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2)),
-        keras.layers.Bidirectional(keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2)),
+        keras.layers.Conv1D(filters=64, kernel_size=3, activation='tanh', padding='causal', input_shape=input_shape),
 
-        keras.layers.Dense(units=64, activation='linear'),
-        keras.layers.Dense(units=1, activation='linear')
+        keras.layers.Bidirectional(keras.layers.LSTM(units=64, return_sequences=True, recurrent_dropout=0.2)),
+        keras.layers.Bidirectional(keras.layers.LSTM(units=64, return_sequences=True, recurrent_dropout=0.2)),
+        keras.layers.Bidirectional(keras.layers.LSTM(units=64, return_sequences=True, recurrent_dropout=0.2)),
+
+        keras.layers.TimeDistributed(keras.layers.Dense(units=16, activation='sigmoid')),
+        keras.layers.TimeDistributed(keras.layers.Dense(units=1, activation='sigmoid'))
     ])
 
     optimizer = keras.optimizers.Adam(learning_rate=0.001)
-    lstm_model.compile(loss='mean_squared_error', optimizer=optimizer)
+    lstm_model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['binary_accuracy'])
 
     return lstm_model
 
@@ -114,14 +92,14 @@ def get_lstm_model_perf(predictions, actuals):
     predictions_len = len(predictions)
 
     # calculate number of total actual upward and downward directions
-    total_ups = sum([1 if actuals[i] >= 0 else 0 for i in range(len(actuals))])
+    total_ups = sum([1 if actuals[i] >= 0.5 else 0 for i in range(len(actuals))])
     total_downs = len(actuals) - total_ups
 
     # calculate true positives, true negatives, false positives, and false negatives
-    tp = sum([1 if (predictions[i] >= 0 and actuals[i] >= 0) else 0 for i in range(predictions_len)])
-    tn = sum([1 if (predictions[i] < 0 and actuals[i] < 0) else 0 for i in range(predictions_len)])
-    fp = sum([1 if (predictions[i] >= 0 and actuals[i] < 0) else 0 for i in range(predictions_len)])
-    fn = sum([1 if (predictions[i] < 0 and actuals[i] >= 0) else 0 for i in range(predictions_len)])
+    tp = sum([1 if (predictions[i] >= 0.5 and actuals[i] >= 0.5) else 0 for i in range(predictions_len)])
+    tn = sum([1 if (predictions[i] < 0.5 and actuals[i] < 0.5) else 0 for i in range(predictions_len)])
+    fp = sum([1 if (predictions[i] >= 0.5 and actuals[i] < 0.5) else 0 for i in range(predictions_len)])
+    fn = sum([1 if (predictions[i] < 0.5 and actuals[i] >= 0.5) else 0 for i in range(predictions_len)])
 
     # calculate directional accuracy, upward directional accuracy, and downward directional accuracy
     da = (tp + tn) / (tp + tn + fp + fn)
@@ -160,6 +138,7 @@ def experiment(data):
     data_len = len(data)
     input_shape = data_copy[0]['train_x'].shape[1:]
 
+
     predictions = []
     actuals = []
 
@@ -187,21 +166,16 @@ def experiment(data):
         shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
         lstm_model = make_lstm_model(input_shape)
+
         lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
-        curr_predictions = forecast_lstm_model(lstm_model, test_x)
-        curr_actuals = np.array([test_y[i, -1] for i in range(len(test_y))])
-
-        curr_scaler = data_copy[index]['scaler']
-        curr_col_names = data_copy[index]['col_names']
-
-        curr_predictions = list(inverse_transform_data(curr_predictions, curr_scaler, curr_col_names, feature="log_return"))
-        curr_actuals = list(inverse_transform_data(curr_actuals, curr_scaler, curr_col_names, feature="log_return"))
+        curr_predictions = list(forecast_lstm_model(lstm_model, test_x))
+        curr_actuals = [test_y[i, -1] for i in range(len(test_y))]
 
         predictions = predictions + curr_predictions
         actuals = actuals + curr_actuals
 
-        correct_predictions_num = sum([1 if (curr_predictions[i] >= 0 and curr_actuals[i] >= 0) or (curr_predictions[i] < 0 and curr_actuals[i] < 0) else 0 for i in range(len(curr_predictions))])
+        correct_predictions_num = sum([1 if (curr_predictions[i] >= 0.5 and curr_actuals[i] >= 0.5) or (curr_predictions[i] < 0.5 and curr_actuals[i] < 0.5) else 0 for i in range(len(curr_predictions))])
         curr_directional_accuracy = correct_predictions_num / len(curr_predictions)
         print(f"Batch DA: {round(curr_directional_accuracy, 6)}")
 
@@ -304,13 +278,13 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
     data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=None)
 
     features = data[0]['col_names'].copy()
-    correlations = data[0]['correlations'].copy()
+    mutual_infos = data[0]['mutual_infos'].copy()
 
     stock_returns_index = features.index('log_return')
     features.remove('log_return')
-    correlations.pop(stock_returns_index)
+    mutual_infos.pop(stock_returns_index)
 
-    features = [x for _, x in sorted(zip(correlations, features), reverse=True)]
+    features = [x for _, x in sorted(zip(mutual_infos, features), reverse=True)]
 
     num_features = len(features)
     dropped_features = features.copy()
@@ -389,7 +363,7 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
 
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'ALI'
 
     # parameters of each model
     time_steps = 20
@@ -401,6 +375,7 @@ def main():
 
     # dropped features
     dropped_features = None
+    ['slope3', 'slope4', 'wr5', 'p/e', 'intraday_return', 'atr14', 'atr5', 'lband', 'psei_returns', 'mband', 'uband', 'slope2', 'adx14', 'sentiment', 'cmf20', 'adx5', 'rsi14', 'k_values_y', 'k_values_x', 'cci20', 'cmf5', 'gdp', 'd_values_y', 'd_values_x', 'signal', 'inflation', 'volatility5', 'macd26', 'ad', 'real_interest_rate', 'slope14']
     # ALI ['lband', 'p/e', 'mband', 'uband', 'wr5', 'k_values_y', 'k_values_x', 'd_values_y', 'd_values_x', 'macd26', 'rsi14', 'rsi5', 'cmf20', 'atr5', 'roe', 'signal', 'slope2', 'slope5', 'adx14', 'cci20', 'cci5', 'gdp', 'slope4', 'adx5', 'inflation', 'intraday_return', 'psei_returns', 'atr14', 'slope3', 'eps']
     ['divergence', 'lband', 'p/e', 'mband', 'wr5', 'uband', 'wr14', 'k_values_x', 'd_values_y', 'd_values_x', 'rsi5', 'macd26', 'rsi14', 'ad', 'atr5', 'cmf20', 'real_interest_rate', 'sentiment', 'slope2', 'slope5', 'signal', 'gdp', 'cci5', 'adx14', 'slope4', 'adx5', 'intraday_return', 'atr14', 'inflation', 'psei_returns', 'slope3', 'eps']
 
@@ -466,9 +441,10 @@ def main():
 if __name__ == '__main__':
 
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
     main()
 
-    # pruned_features = simple_feature_selection('BPI', 20, 1004, 21, repeats=8)
+    # pruned_features = simple_feature_selection('BPI', 20, 1004, 21, repeats=4)
     # print(f"Dropped Features: {pruned_features}")

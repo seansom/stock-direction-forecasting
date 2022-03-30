@@ -7,7 +7,7 @@ import datetime, requests, json, math, shelve, sys, os, re, pathlib
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer, StandardScaler, MinMaxScaler, RobustScaler
-from sklearn.feature_selection import SelectKBest, r_regression, mutual_info_regression
+from sklearn.feature_selection import mutual_info_classif, r_regression, mutual_info_regression
 from eventregistry import *
 from statistics import mean
 
@@ -76,7 +76,6 @@ def get_technical_indicators(data):
         intraday_return = math.log(Decimal(close[i]) / Decimal(open_price[i]))
         intraday_returns.append(intraday_return)
 
-
     # compute A/D indicator values
     ad = []
     for i in range(data_len):
@@ -90,6 +89,9 @@ def get_technical_indicators(data):
         mfm = ((ad_close - ad_low) - (ad_high - ad_close)) / (ad_high - ad_low)
         curr_ad =  mfm * data['volume'][i]
         ad.append(curr_ad)
+
+    discretized_ad = [1 if ad[i] >= ad[i - 1] else -1 for i in range(1, len(ad))]
+    discretized_ad.insert(0, np.NaN)
 
     # compute William's %R indicator values
     wr14_period = 14
@@ -106,6 +108,11 @@ def get_technical_indicators(data):
         curr_wr14 = Decimal(wr14_high - wr14_close) / Decimal(wr14_high - wr14_low)
         wr14.append(curr_wr14)
 
+    discretized_wr14 = [1 if wr14[i] >= wr14[i - 1] else -1 for i in range(wr14_period, len(wr14))]
+    for i in range(wr14_period):
+        discretized_wr14.insert(0, np.NaN)
+
+
     # compute William's %R indicator values (5-day)
     wr5_period = 5
     wr5 = [np.NaN] * (wr5_period - 1)
@@ -120,6 +127,10 @@ def get_technical_indicators(data):
         
         curr_wr5 = Decimal(wr5_high - wr5_close) / Decimal(wr5_high - wr5_low)
         wr5.append(curr_wr5)
+
+    discretized_wr5 = [1 if wr5[i] >= wr5[i - 1] else -1 for i in range(wr5_period, len(wr5))]
+    for i in range(wr5_period):
+        discretized_wr5.insert(0, np.NaN)
 
     # compute Chaulkin Money Flow indicator
     cmf20_period = 20
@@ -143,6 +154,9 @@ def get_technical_indicators(data):
         curr_cmf20 = sum(mfv20[i - cmf20_period : i]) / sum(data['volume'][i - cmf20_period : i])
         cmf20.append(curr_cmf20)
 
+    discretized_cmf20 = [1 if cmf20[i] >= 0 else -1 for i in range(cmf20_period - 1, len(cmf20))]
+    for i in range(cmf20_period - 1):
+        discretized_cmf20.insert(0, np.NaN)
 
     # compute Chaulkin Money Flow indicator (5-day)
     cmf5_period = 5
@@ -166,17 +180,20 @@ def get_technical_indicators(data):
         curr_cmf5 = sum(mfv5[i - cmf5_period : i]) / sum(data['volume'][i - cmf5_period : i])
         cmf5.append(curr_cmf5)
 
+    discretized_cmf5 = [1 if cmf5[i] >= 0 else -1 for i in range(cmf5_period - 1, len(cmf5))]
+    for i in range(cmf5_period - 1):
+        discretized_cmf5.insert(0, np.NaN)
 
     # convert to dataframe
     technical_indicators = pd.DataFrame({
         'date': data['date'],
         'log_return': stock_returns,
         'intraday_return' : intraday_returns,
-        'ad' : ad,
-        'wr14' : wr14,
-        'wr5' : wr5,
-        'cmf20' : cmf20,
-        'cmf5' : cmf5
+        'ad' : discretized_ad,
+        'wr14' : discretized_wr14,
+        'wr5' : discretized_wr5,
+        'cmf20' : discretized_cmf20,
+        'cmf5' : discretized_cmf5
     })
 
     return technical_indicators
@@ -213,6 +230,62 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
 
     # convert to pd.dataframe
     data = pd.json_normalize(data)
+
+    
+
+    if indicator == 'macd':
+
+        macd = data['macd'].to_list()
+        discretized_macd = [1 if macd[i] >= macd[i - 1] else -1 for i in range(1, len(macd))]
+        discretized_macd.insert(0, np.NaN)
+
+        divergence = data['divergence'].to_list()
+        discretized_divergence = [1 if divergence[i] >= 0 else -1 for i in range(len(macd))]
+
+        data = pd.DataFrame({
+            'date' : data['date'],
+            'macd' : discretized_macd,
+            'divergence' : discretized_divergence
+        })
+
+    if indicator == 'rsi':
+
+        rsi = data['rsi'].to_list()
+        discretized_rsi = [1 if rsi[i] >= rsi[i - 1] else -1 for i in range(1, len(rsi))]
+        discretized_rsi.insert(0, np.NaN)
+
+        data = pd.DataFrame({
+            'date' : data['date'],
+            'rsi' : discretized_rsi,
+        })
+
+    if indicator =='cci':
+
+        cci = data['cci'].to_list()
+        discretized_cci = [1 if (cci[i] >= 200 or (cci[i] >= -200 and cci[i] >= cci[i - 1])) else -1 for i in range(1, len(cci))]
+        discretized_cci.insert(0, np.NaN)
+
+        data = pd.DataFrame({
+            'date' : data['date'],
+            'cci' : discretized_cci,
+        })
+
+    if indicator == 'stochastic':
+
+        k_values = data['k_values'].to_list()
+        d_values = data['d_values'].to_list()
+
+        discretized_k_values = [1 if k_values[i] >= k_values[i - 1] else -1 for i in range(1, len(k_values))]
+        discretized_k_values.insert(0, np.NaN)
+
+        discretized_d_values = [1 if d_values[i] >= d_values[i - 1] else -1 for i in range(1, len(d_values))]
+        discretized_d_values.insert(0, np.NaN)
+
+        data = pd.DataFrame({
+            'date' : data['date'],
+            'k_values' : discretized_k_values,
+            'd_values' : discretized_d_values
+        })
 
     # remove rows with dates earlier than wanted from date
     for index, row in data.iterrows():
@@ -296,7 +369,7 @@ def get_technical_data(stock_ticker, date_range):
     data = data.reset_index(drop=True)
 
     # get available technical indicators from API. format: (indicator, period)
-    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26), ('slope', 2), ('slope', 3), ('slope', 4), ('slope', 5), ('volatility', 5), ('bbands', 5), ('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('stochastic', 5)]
+    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26), ('slope', 2), ('slope', 3), ('slope', 4), ('slope', 5), ('volatility', 5), ('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('stochastic', 5)]
     #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
     #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
@@ -306,7 +379,6 @@ def get_technical_data(stock_ticker, date_range):
 
     # remove unneeded features/columns in dataframe
     data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close', 'volume'])
-    # data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
@@ -983,7 +1055,7 @@ def transform_data(train, test):
     col_num = train.shape[1]
 
     # scale data for train & test data
-    scaler = PowerTransformer()
+    scaler = RobustScaler()
     
     # Apply Yeo-Johnson Transform
     train = scaler.fit_transform(train)
@@ -1074,34 +1146,14 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     stock_returns_index = train_test_sets[0][0].columns.get_loc("log_return")
 
     feature_selection_train_x = train_test_sets[0][0].to_numpy()[:-1]
-    feature_selection_train_y = train_test_sets[0][0].to_numpy()[1:, stock_returns_index]
+    feature_selection_train_y = np.where(train_test_sets[0][0].to_numpy()[1:, stock_returns_index] >= 0, 1, 0)
 
-    correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
-    correlations = [round(abs(i), 6) for i in correlations]
-
-    # print(correlations)
-
-    # correlations = [1 if i >= mean(correlations) else 0 for i in correlations]
+    mutual_infos = mutual_info_classif(feature_selection_train_x, feature_selection_train_y, random_state=0)
+    mutual_infos = [round(abs(i), 6) for i in mutual_infos]
 
     # col_names = list(train_test_sets[0][0])
-
-    # print(correlations)
-    # print(col_names)
-
-    # dropped_features = []
-    
-    # for index, value in enumerate(correlations):
-    #     if not value and col_names[index] != 'log_return':
-    #         dropped_features.append(col_names[index])
-
-    # print('======')
-    # print(dropped_features)
-
-    # FEATURE SELECTION END
-
-    # for train_test_set in train_test_sets:
-    #     train_test_set[0] = train_test_set[0].drop(columns=dropped_features)
-    #     train_test_set[1] = train_test_set[1].drop(columns=dropped_features)
+    # print([(col_names[i], mutual_infos[i]) for i in range(len(col_names))])
+    # sys.exit()
 
     processed_train_test_sets = []
 
@@ -1112,13 +1164,13 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
             'train' : train,
             'test' : test,
             'col_names' : col_names,
-            'correlations' : correlations
+            'mutual_infos' : mutual_infos
         })
 
     return processed_train_test_sets
 
 
-def make_data_window(train, test, time_steps=1):
+def make_data_window(scaler, col_names, train, test, time_steps=1):
     """Creates data windows for the train and test datasets.
     Splits train and test datasets into train_x, train_y, test_x,
     and test_y datasets. The _x datasets represent model input datasets
@@ -1163,6 +1215,12 @@ def make_data_window(train, test, time_steps=1):
     train_y = np.array(train_y)
     test_x = np.array(test_x)
     test_y = np.array(test_y)
+
+    train_y = np.array([inverse_transform_data(i, scaler, col_names, feature="log_return") for i in train_y])
+    test_y = np.array([inverse_transform_data(i, scaler, col_names, feature="log_return") for i in test_y])
+
+    train_y = np.where(train_y >= 0, 1, 0)
+    test_y = np.where(test_y >= 0, 1, 0)
 
     return train_x, train_y, test_x, test_y
 #data_processing END
@@ -1212,12 +1270,12 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
     windowed_train_test_sets = []
 
     for train_test_set in processed_train_test_sets:
-        train_x, train_y, test_x, test_y = make_data_window(train_test_set['train'], train_test_set['test'], time_steps)
+        train_x, train_y, test_x, test_y = make_data_window(train_test_set['scaler'], train_test_set['col_names'], train_test_set['train'], train_test_set['test'], time_steps)
 
         windowed_train_test_sets.append({
             'scaler' : train_test_set['scaler'],
             'col_names' : train_test_set['col_names'],
-            'correlations' : train_test_set['correlations'],
+            'mutual_infos' : train_test_set['mutual_infos'],
             'train_x' : train_x,
             'train_y' : train_y,
             'test_x' : test_x,
@@ -1228,8 +1286,8 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
 
 
 def main():
-    stock_ticker = 'ALI'
-    windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=1004, test_size=21, drop_col=None)
+    stock_ticker = 'MER'
+    windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=5, train_size=1004, test_size=21, drop_col=None)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(windowed_train_test_sets[0]['col_names'])

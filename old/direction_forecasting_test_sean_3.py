@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import os, sys, math, copy, random, shutil
 from sklearn.preprocessing import PowerTransformer
-from data_processing import get_dataset, inverse_transform_data
+from data_processing_test_sean import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -49,13 +49,6 @@ def get_optimal_hps(train_x, train_y):
     if os.path.exists('untitled_project'):
         shutil.rmtree('untitled_project')
 
-    shuffled_train_indices = list(range(train_x.shape[0]))
-    random.seed(0)
-    random.shuffle(shuffled_train_indices)
-
-    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
-
     time_steps = train_x.shape[1]
     features = train_x.shape[2]
 
@@ -67,7 +60,7 @@ def get_optimal_hps(train_x, train_y):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
-    tuner.search(shuffled_train_x, shuffled_train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -89,10 +82,11 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
         units = hps['units']
         dropout = hps['dropout']
 
+
     lstm_model = keras.models.Sequential()
 
     for _ in range(layers):
-        lstm_model.add(keras.layers.LSTM(units=units, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout))
+        lstm_model.add(keras.layers.LSTM(units=untis, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout))
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
 
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
@@ -191,22 +185,15 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
+def experiment(scaler, col_names, train_x, train_y, test_x, test_y):
 
     train_x_copy = copy.deepcopy(train_x)
     train_y_copy = copy.deepcopy(train_y)
     test_x_copy = copy.deepcopy(test_x)
     test_y_copy = copy.deepcopy(test_y)
 
-    shuffled_train_indices = list(range(train_x_copy.shape[0]))
-    random.seed(0)
-    random.shuffle(shuffled_train_indices)
-
-    shuffled_train_x_copy = np.array([train_x_copy[i] for i in shuffled_train_indices])
-    shuffled_train_y_copy = np.array([train_y_copy[i] for i in shuffled_train_indices])
-
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(shuffled_train_x_copy, shuffled_train_y_copy, epochs=100, hps=hps)
+    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100)
 
     # get the model predictions
     predictions = forecast_lstm_model(lstm_model, test_x_copy)
@@ -221,28 +208,38 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
     # get model performance statistics
     perf = get_lstm_model_perf(predictions, test_y_copy)
 
+    # print(predictions[:10])
+    # print(test_y_copy[:10])
+
     return perf, test_y_copy, predictions
 
 
 def main():
     # stock to be predicted
-    stock_ticker = 'JFC'
+    stock_ticker = 'PGOLD'
 
     # parameters of each model
     time_steps = 20
-    hps = None
 
     # how many models built (min = 2)
     repeats = 2
 
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
+
+    shuffled_train_indices = list(range(train_x.shape[0]))
+    shuffled_test_indices = list(range(test_x.shape[0]))
+    random.seed(0)
+    random.shuffle(shuffled_train_indices)
+
+    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
     
     print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps)
+        perf, _, _ = experiment(scaler, col_names, shuffled_train_x, shuffled_train_y, test_x, test_y)
         performances.append(perf)
         print("===================================================")
 
@@ -285,7 +282,7 @@ def main():
 
 
 if __name__ == '__main__':
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-    compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
-
     main()
+
+    # pruned_features = feature_selection('AP', 5, repeats=2)
+    # print(f"Dropped Features: {pruned_features}")

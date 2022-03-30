@@ -4,3 +4,4 @@ tensorflow
 keras-tuner
 eventregistry
 gensim
+sklearn

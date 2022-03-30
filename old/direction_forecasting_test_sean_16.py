@@ -369,16 +369,19 @@ def backward_feature_selection(stock_ticker, time_steps, repeats=25):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'PGOLD'
 
     # parameters of each model
-    time_steps = 1
+    time_steps = 20
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = ['wr14', 'cmf20', 'atr14', 'adx14', 'k_values_x', 'd_values_x', 'slope2', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'k_values_y', 'd_values_y', 'real_interest_rate', 'roe']
+    dropped_features = None
+    ['volatility5', 'slope14', 'divergence', 'wr14', 'p/e', 'd_values_x', 'rsi14', 'macd26', 'ad', 'intraday_return', 'cci20', 'atr5', 'signal', 'cci5', 'slope3', 'adx5', 'adx14', 'sentiment', 'real_interest_rate', 'roe', 'gdp', 'inflation', 'atr14', 'psei_returns', 'eps']
+    # AP forward ['intraday_return', 'wr5', 'slope2', 'rsi5', 'slope5', 'rsi14', 'cmf5', 'cci5', 'divergence', 'cci20', 'slope14', 'mband', 'k_values_y', 'k_values_x', 'lband', 'volatility5', 'signal', 'eps', 'atr5', 'd_values_y', 'inflation', 'roe', 'atr14', 'gdp', 'psei_returns', 'real_interest_rate', 'sentiment']
+    # bpi backward ['macd26', 'eps', 'd_values_x', 'signal', 'cmf20', 'adx5', 'divergence', 'slope2', 'slope5', 'wr5']
     # bpi forward ['slope4', 'cci5', 'slope5', 'rsi5', 'p/e', 'atr14', 'atr5', 'slope2', 'lband', 'mband', 'uband', 'sentiment', 'rsi14', 'divergence', 'adx14', 'cmf5', 'k_values_y', 'k_values_x', 'cci20', 'cmf20', 'inflation', 'ad', 'gdp', 'signal', 'd_values_x', 'slope14', 'real_interest_rate', 'roe', 'eps']
     #['volatility5', 'wr14', 'mband', 'k_values_y', 'k_values_x', 'uband', 'd_values_y', 'd_values_x', 'rsi14', 'macd26', 'slope2', 'slope4', 'cmf20', 'atr5', 'signal', 'cci5', 'slope3', 'adx5', 'adx14', 'sentiment', 'real_interest_rate', 'roe', 'gdp', 'inflation', 'atr14', 'psei_returns']
     # ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'p/e']
@@ -447,7 +450,7 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
+    main()
 
-    pruned_features = backward_feature_selection('BPI', 1, repeats=10)
-    print(f"Dropped Features: {pruned_features}")
+    # pruned_features = forward_feature_selection('ALI', 1, repeats=10)
+    # print(f"Dropped Features: {pruned_features}")

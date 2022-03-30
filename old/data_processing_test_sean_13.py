@@ -64,7 +64,7 @@ def get_technical_indicators(data):
     data_len = len(close)
 
     # compute log stock returns
-    stock_returns_period = 1
+    stock_returns_period = 5
     stock_returns = [np.NaN] * stock_returns_period
     for i in range(stock_returns_period, data_len):
         stock_return = math.log(Decimal(close[i]) / Decimal(close[i - stock_returns_period]))
@@ -306,7 +306,6 @@ def get_technical_data(stock_ticker, date_range):
 
     # remove unneeded features/columns in dataframe
     data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close', 'volume'])
-    # data = data.drop(columns=['open', 'high', 'low', 'adjusted_close', 'close'])
 
     if data.isnull().values.any():
         raise Exception(f'Null value found in technical dataset for {stock_ticker}')
@@ -952,14 +951,17 @@ def train_test_split(data, time_steps, train_size, test_size):
 
     train_test_sets = []
 
+    delay_days = 5
+
     data_len = data.shape[0]
-    train_test_sets_num = (data_len - time_steps - train_size) // test_size
-    shift_days = (data_len - time_steps - train_size) % test_size
+    train_test_sets_num = (data_len - time_steps - train_size - (delay_days - 1)) // test_size
+    shift_days = ((data_len - time_steps - train_size - (delay_days - 1)) % test_size)
+    
 
     for i in range(train_test_sets_num):
 
-        curr_train = data[i * test_size + shift_days : i * test_size + train_size + time_steps + shift_days]
-        curr_test = data[i * test_size + train_size + shift_days : (i + 1) * test_size + train_size + time_steps + shift_days]
+        curr_train = data[i * test_size + shift_days : i * test_size + train_size + time_steps + shift_days + (delay_days - 1)]
+        curr_test = data[i * test_size + train_size + shift_days : (i + 1) * test_size + train_size + time_steps + shift_days + (delay_days - 1)]
 
         train_test_sets.append([curr_train, curr_test])
 
@@ -1118,7 +1120,7 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     return processed_train_test_sets
 
 
-def make_data_window(train, test, time_steps=1):
+def make_data_window(scaler, col_names, train, test, time_steps=1):
     """Creates data windows for the train and test datasets.
     Splits train and test datasets into train_x, train_y, test_x,
     and test_y datasets. The _x datasets represent model input datasets
@@ -1151,18 +1153,26 @@ def make_data_window(train, test, time_steps=1):
     # y values: actual future values to be predicted from data window
     train_x, train_y, test_x, test_y = [], [], [], []
 
-    for i in range(time_steps, train_len):
-        train_x.append([train[j, :] for j in range(i - time_steps, i)])
-        train_y.append([train[j, stock_returns_index] for j in range(i - time_steps + 1, i + 1)])
+    delay_days = 5
 
-    for i in range(time_steps, test_len):
+    for i in range(time_steps, train_len - (delay_days - 1)):
+        train_x.append([train[j, :] for j in range(i - time_steps, i)])
+        train_y.append([train[j, stock_returns_index] for j in range(i - time_steps + delay_days, i + delay_days)])
+
+    for i in range(time_steps, test_len - (delay_days - 1)):
         test_x.append([test[j, :] for j in range(i - time_steps, i)])
-        test_y.append([test[j, stock_returns_index] for j in range(i - time_steps + 1, i + 1)])
+        test_y.append([test[j, stock_returns_index] for j in range(i - time_steps + delay_days, i + delay_days)])
 
     train_x = np.array(train_x)
     train_y = np.array(train_y)
     test_x = np.array(test_x)
     test_y = np.array(test_y)
+
+    train_y = np.array([inverse_transform_data(i, scaler, col_names, feature="log_return") for i in train_y])
+    test_y = np.array([inverse_transform_data(i, scaler, col_names, feature="log_return") for i in test_y])
+
+    train_y = np.where(train_y >= 0, 1, 0)
+    test_y = np.where(test_y >= 0, 1, 0)
 
     return train_x, train_y, test_x, test_y
 #data_processing END
@@ -1212,7 +1222,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
     windowed_train_test_sets = []
 
     for train_test_set in processed_train_test_sets:
-        train_x, train_y, test_x, test_y = make_data_window(train_test_set['train'], train_test_set['test'], time_steps)
+        train_x, train_y, test_x, test_y = make_data_window(train_test_set['scaler'], train_test_set['col_names'], train_test_set['train'], train_test_set['test'], time_steps)
 
         windowed_train_test_sets.append({
             'scaler' : train_test_set['scaler'],
@@ -1228,8 +1238,8 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=95, test
 
 
 def main():
-    stock_ticker = 'ALI'
-    windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=1, train_size=1004, test_size=21, drop_col=None)
+    stock_ticker = 'AP'
+    windowed_train_test_sets = get_dataset(stock_ticker, date_range=None, time_steps=20, train_size=1004, test_size=21, drop_col=None)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(windowed_train_test_sets[0]['col_names'])

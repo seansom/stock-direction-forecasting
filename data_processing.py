@@ -1,13 +1,12 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-import datetime, requests, json, math, shelve, sys, os, re, pathlib
-
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
+import datetime, requests, json, math, shelve, sys, os, re, pathlib, random
 
 #get_technical_data START
 def get_dates_five_years(testing=False):
@@ -244,8 +243,6 @@ def get_technical_data(stock_ticker, date_range):
 
     # get available technical indicators from API. format: (indicator, period)
     EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
-    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
-    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
     for indicator, period in EOD_indicators:
         indicator_data = get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
@@ -877,10 +874,8 @@ def get_sentimental_data (stock_ticker, date_range):
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
-    
     Args:
         data (pd.DataFrame): The entire dataset.
-
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """	
@@ -894,7 +889,7 @@ def scale_data(data):
     return data
 
 
-def train_test_split(data):
+def train_test_split(data, time_steps):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -904,9 +899,39 @@ def train_test_split(data):
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
-    test_len = len(data) * 2 // 10
-    train, test = data[:-test_len], data[-test_len:]
-    return train, test
+    
+    data_len = len(data)
+    
+    target_indices = list(range(time_steps, data_len))
+    test_len = len(target_indices) * 2 // 10
+    
+
+    random.seed(0)
+    random.shuffle(target_indices)
+
+    train_targets = sorted(target_indices[:-test_len])
+    test_targets = sorted(target_indices[-test_len:])
+
+    train_indices = []
+    test_indices = []
+
+    for i in range(len(train_targets)):
+        for j in range(train_targets[i] - time_steps, train_targets[i] + 1):
+            if j not in train_indices:
+                train_indices.append(j)
+    
+    for i in range(len(test_targets)):
+        for j in range(test_targets[i] - time_steps, test_targets[i] + 1):
+            if j not in test_indices:
+                test_indices.append(j)
+
+    train_indices = sorted(train_indices)
+    test_indices = sorted(test_indices)
+
+    train_set = data.loc[train_indices]
+    test_set = data.loc[test_indices]
+
+    return train_set, test_set, train_targets, test_targets, train_indices, test_indices
 
 
 def transform_data(train, test):
@@ -974,7 +999,7 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None):
+def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col=None):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1003,20 +1028,23 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     # raise exception if missing/null value is found in the combined dataset
     if data.isnull().values.any():
         raise Exception(f'Null value found in combined dataset.')
+
+    # print(data)
     
     #scale data
     scaled_data = scale_data(data)
 
     #split data into train and test
-    train, test = train_test_split(scaled_data)
+    train, test, train_targets, test_targets, train_indices, test_indices = train_test_split(scaled_data, time_steps)
     
     #apply Yeo-Johnson Power Transfrom
     scaler, train, test, col_names = transform_data(train, test)
 
-    return scaler, train, test, col_names
+    return scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices
 
 
-def make_data_window(train, test, time_steps=1):
+
+def make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps=1):
     """Creates data windows for the train and test datasets.
     Splits train and test datasets into train_x, train_y, test_x,
     and test_y datasets. The _x datasets represent model input datasets
@@ -1042,25 +1070,19 @@ def make_data_window(train, test, time_steps=1):
     train = train.to_numpy()
     test = test.to_numpy()
 
-    train_len = train.shape[0]
-    test_len = test.shape[0]
-
     # x values: the input data window
     # y values: actual future values to be predicted from data window
     train_x, train_y, test_x, test_y = [], [], [], []
 
-    for i in range(train_len):
+    for index, row in enumerate(train_indices):
+        if row in train_targets:
+            train_x.append([train[j, :] for j in range(index - time_steps, index)])
+            train_y.append([train[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
 
-        if (i + time_steps) < train_len:
-            train_x.append([train[j, :] for j in range(i, i + time_steps)])
-            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
-            
-    for i in range(test_len):
-        
-        if (i + time_steps) < test_len:
-            test_x.append([test[j, :] for j in range(i, i + time_steps)])
-            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
-
+    for index, row in enumerate(test_indices):
+        if row in test_targets:
+            test_x.append([test[j, :] for j in range(index - time_steps, index)])
+            test_y.append([test[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
 
     train_x = np.array(train_x)
     train_y = np.array(train_y)
@@ -1110,14 +1132,14 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col)
-    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
+    scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
+    train_x, train_y, test_x, test_y = make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps)
 
     return scaler, col_names, train_x, train_y, test_x, test_y
 
 
 def main():
-    stock_ticker = 'AP'
+    stock_ticker = 'TEL'
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=['psei_returns'])
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
