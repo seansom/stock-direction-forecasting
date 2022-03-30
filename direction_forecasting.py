@@ -4,7 +4,7 @@ from statistics import mean, stdev
 import keras_tuner as kt
 import numpy as np
 import pandas as pd
-import os, sys, math, copy, random, shutil
+import os, sys, math, copy, shutil
 from sklearn.preprocessing import PowerTransformer
 from data_processing import get_dataset, inverse_transform_data
 
@@ -49,13 +49,6 @@ def get_optimal_hps(train_x, train_y):
     if os.path.exists('untitled_project'):
         shutil.rmtree('untitled_project')
 
-    shuffled_train_indices = list(range(train_x.shape[0]))
-    random.seed(0)
-    random.shuffle(shuffled_train_indices)
-
-    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
-
     time_steps = train_x.shape[1]
     features = train_x.shape[2]
 
@@ -67,7 +60,7 @@ def get_optimal_hps(train_x, train_y):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
-    tuner.search(shuffled_train_x, shuffled_train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -198,15 +191,8 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
     test_x_copy = copy.deepcopy(test_x)
     test_y_copy = copy.deepcopy(test_y)
 
-    shuffled_train_indices = list(range(train_x_copy.shape[0]))
-    random.seed(0)
-    random.shuffle(shuffled_train_indices)
-
-    shuffled_train_x_copy = np.array([train_x_copy[i] for i in shuffled_train_indices])
-    shuffled_train_y_copy = np.array([train_y_copy[i] for i in shuffled_train_indices])
-
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(shuffled_train_x_copy, shuffled_train_y_copy, epochs=100, hps=hps)
+    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100, hps=hps)
 
     # get the model predictions
     predictions = forecast_lstm_model(lstm_model, test_x_copy)
