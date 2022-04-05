@@ -57,7 +57,7 @@ def get_optimal_hps(train_x, train_y):
 
     # if overwrite is false, previously-saved computed hps will be used
     tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
     tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
@@ -88,7 +88,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
         lstm_model.add(keras.layers.LSTM(units=units, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout))
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
@@ -221,13 +221,13 @@ def main():
     # how many models built (min = 2)
     repeats = 2
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
     
     print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
+        scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
         perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps)
         performances.append(perf)
         print("===================================================")
@@ -239,8 +239,11 @@ def main():
     std_da = stdev([perf['da'] for perf in performances])
     std_uda = stdev([perf['uda'] for perf in performances])
     std_dda = stdev([perf['dda'] for perf in performances])
+
+    mean_total_ups = mean([perf['total_ups'] for perf in performances])
+    mean_total_downs = mean([perf['total_downs'] for perf in performances])
     
-    optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
+    optimistic_baseline = mean_total_ups / (mean_total_ups + mean_total_downs)
     pessimistic_baseline = 1 - optimistic_baseline
 
     print(f'Stock: {stock_ticker}')
@@ -270,8 +273,89 @@ def main():
 
 
 
+def get_hps():
+    # stock to be predicted
+    stock_ticker = 'ALI'
+
+    # parameters of each model
+    time_steps_list = [1, 5, 10, 15, 20]
+
+    hps_list = []
+
+    for time_steps in time_steps_list:
+        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
+        hps = get_optimal_hps(train_x, train_y)
+
+        hps_list.append(hps)
+
+    for i in hps_list:
+        print(i)
+
+
+def batch_test():
+    # stock to be predicted
+    stock_ticker = 'AP'
+
+    repeats = 2
+
+    # parameters of each model
+    time_steps_list = [20]
+
+    hps_list = [
+        {'units': 256, 'layers': 5, 'dropout': 0.4, 'tuner/epochs': 34, 'tuner/initial_epoch': 12, 'tuner/bracket': 4, 'tuner/round': 3, 'tuner/trial_id': 'b2b586e8af6803606cf8653c9902e395'},
+    ]
+
+    # hps_list = [
+    #     {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '6bdb16b6d5b090d7c064a083dc55f774'}
+    # ]
+
+    perfs = []
+
+    for i in range(len(time_steps_list)):
+
+        time_steps = time_steps_list[i]
+        hps = hps_list[i]
+
+        curr_performances = []
+
+        for _ in range(repeats):
+            scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
+            perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=hps)
+            curr_performances.append(perf)
+
+        mean_da = mean([perf['da'] for perf in curr_performances])
+        mean_uda = mean([perf['uda'] for perf in curr_performances])
+        mean_dda = mean([perf['dda'] for perf in curr_performances])
+
+        std_da = stdev([perf['da'] for perf in curr_performances])
+        std_uda = stdev([perf['uda'] for perf in curr_performances])
+        std_dda = stdev([perf['dda'] for perf in curr_performances])
+
+        mean_total_ups = mean([perf['total_ups'] for perf in curr_performances])
+        mean_total_downs = mean([perf['total_downs'] for perf in curr_performances])
+        
+        optimistic_baseline = mean_total_ups / (mean_total_ups + mean_total_downs)
+        pessimistic_baseline = 1 - optimistic_baseline
+
+        perfs.append((time_steps, {
+            'mean_da' : mean_da,
+            'mean_uda' : mean_uda,
+            'mean_dda' : mean_dda,
+            'std_da' : std_da,
+            'std_uda' : std_uda,
+            'std_dda' : std_dda,
+            'optimistic_baseline' : optimistic_baseline,
+            'pessimistic_baseline' : pessimistic_baseline,
+        }))
+
+    for i in perfs:
+        print(i)
+
 if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    main()
+    # main()
+    # get_hps()
+
+    batch_test()

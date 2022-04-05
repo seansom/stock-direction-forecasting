@@ -906,7 +906,6 @@ def train_test_split(data, time_steps):
     test_len = len(target_indices) * 2 // 10
     
 
-    random.seed(0)
     random.shuffle(target_indices)
 
     train_targets = sorted(target_indices[:-test_len])
@@ -1089,7 +1088,13 @@ def make_data_window(train, test, train_targets, test_targets, train_indices, te
     test_x = np.array(test_x)
     test_y = np.array(test_y)
 
-    return train_x, train_y, test_x, test_y
+    shuffled_train_indices = list(range(train_x.shape[0]))
+    random.shuffle(shuffled_train_indices)
+
+    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+
+    return shuffled_train_x, shuffled_train_y, test_x, test_y
 #data_processing END
 
 

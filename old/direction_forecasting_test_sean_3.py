@@ -86,7 +86,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     lstm_model = keras.models.Sequential()
 
     for _ in range(layers):
-        lstm_model.add(keras.layers.LSTM(units=untis, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout))
+        lstm_model.add(keras.layers.LSTM(units=units, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout))
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
 
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')

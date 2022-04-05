@@ -36,8 +36,7 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
     # create lstm hypermodel
     for _ in range(layers):
-        lstm_hypermodel.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True,
-                                              recurrent_dropout=dropout))
+        lstm_hypermodel.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout, dropout=dropout))
 
     lstm_hypermodel.add(keras.layers.Dense(units=units / 4, activation="linear"))
     lstm_hypermodel.add(keras.layers.Dense(units=1, activation="linear"))
@@ -48,10 +47,10 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
 
 
-def get_optimal_hps(data, index=0):
+def get_optimal_hps(data):
 
-    train_x = data[index]['train_x']
-    train_y = data[index]['train_y']
+    train_x = data[0]['train_x']
+    train_y = data[0]['train_y']
 
     # the tuner saves files to the current working directory, delete old files if any
     if os.path.exists('untitled_project'):
@@ -67,9 +66,16 @@ def get_optimal_hps(data, index=0):
     tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min', restore_best_weights=True)
 
+    # random.seed(0)
+    # shuffled_train_indices = list(range(train_x.shape[0]))
+    # random.shuffle(shuffled_train_indices)
+
+    # shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    # shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+
+
     # execute Hyperband search of optimal hyperparameters
-    validation_len = train_x.shape[0] * 1 // 10
-    tuner.search(train_x, train_y, validation_data=(train_x[-validation_len:], train_y[-validation_len:]), callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.05, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -95,7 +101,7 @@ def make_lstm_model(input_shape, hps=None):
     lstm_model = keras.models.Sequential()
 
     for _ in range(layers):
-        lstm_model.add(keras.layers.LSTM(units=units, input_shape=input_shape, return_sequences=True, recurrent_dropout=dropout))
+        lstm_model.add(keras.layers.LSTM(units=units, input_shape=input_shape, return_sequences=True, recurrent_dropout=dropout, dropout=dropout))
 
     lstm_model.add(keras.layers.Dense(units=(units / 4), activation='linear'))
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
@@ -196,9 +202,6 @@ def experiment(data, hps=None):
     data_len = len(data)
     input_shape = data_copy[0]['train_x'].shape[1:]
 
-    lstm_model = make_lstm_model(input_shape)
-    lstm_weights = lstm_model.get_weights()
-
     predictions = []
     actuals = []
 
@@ -217,9 +220,8 @@ def experiment(data, hps=None):
         test_x = data_copy[index]['test_x']
         test_y = data_copy[index]['test_y']
 
-        # shuffled_train_indices = list(range(train_x.shape[0]))
-
         # random.seed(0)
+        # shuffled_train_indices = list(range(train_x.shape[0]))
         # random.shuffle(shuffled_train_indices)
 
         # shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
@@ -231,8 +233,7 @@ def experiment(data, hps=None):
 
         lstm_model = make_lstm_model(input_shape, hps)
 
-        validation_len = train_x.shape[0] * 1 // 10
-        history = lstm_model.fit(train_x, train_y, epochs=epochs, validation_data=(train_x[-validation_len:], train_y[-validation_len:]), verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+        history = lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.05, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
     
         # while True:
         #     if len(history.history['loss']) < 25:
@@ -442,19 +443,20 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
 
 def main():
     # stock to be predicted
-    stock_ticker = 'BPI'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 20
     train_size = 1004
     test_size = 21
-    hps = {'layers':3, 'units':256, 'dropout':0.3}
+
+    hps = {'units': 256, 'layers': 2, 'dropout': 0.1, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0}
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 5
 
     # dropped features
-    dropped_features = ['slope3', 'slope4', 'wr5', 'p/e', 'intraday_return', 'atr14', 'atr5', 'lband', 'psei_returns', 'mband', 'uband', 'slope2', 'adx14', 'sentiment', 'cmf20', 'adx5', 'rsi14', 'k_values_y', 'k_values_x', 'cci20', 'cmf5', 'gdp', 'd_values_y', 'd_values_x', 'signal', 'inflation', 'volatility5', 'macd26', 'ad', 'real_interest_rate', 'slope14']
+    dropped_features = ['divergence', 'lband', 'p/e', 'mband', 'wr5', 'uband', 'wr14', 'k_values_x', 'd_values_y', 'd_values_x', 'rsi5', 'macd26', 'rsi14', 'ad', 'atr5', 'cmf20', 'real_interest_rate', 'sentiment', 'slope2', 'slope5', 'signal', 'gdp', 'cci5', 'adx14', 'slope4', 'adx5', 'intraday_return', 'atr14', 'inflation', 'psei_returns', 'slope3', 'eps']
     # PGOLD ['atr14', 'slope2', 'wr14', 'lband', 'p/e', 'k_values_y', 'k_values_x', 'rsi5', 'wr5', 'slope3', 'adx14', 'mband', 'd_values_y', 'd_values_x', 'psei_returns', 'volatility5', 'rsi14', 'cmf5', 'uband', 'eps', 'sentiment', 'slope4', 'signal', 'adx5', 'slope14', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe']
     # AP ['rsi5', 'slope2', 'slope4', 'ad', 'rsi14', 'wr14', 'slope5', 'cmf5', 'cci20', 'macd26', 'slope14', 'k_values_x', 'adx14', 'cmf20', 'signal', 'p/e', 'adx5', 'atr5', 'volatility5', 'd_values_y', 'd_values_x', 'uband', 'mband', 'lband', 'atr14', 'psei_returns', 'eps', 'roe', 'inflation']
     # ALI ['divergence', 'lband', 'p/e', 'mband', 'wr5', 'uband', 'wr14', 'k_values_x', 'd_values_y', 'd_values_x', 'rsi5', 'macd26', 'rsi14', 'ad', 'atr5', 'cmf20', 'real_interest_rate', 'sentiment', 'slope2', 'slope5', 'signal', 'gdp', 'cci5', 'adx14', 'slope4', 'adx5', 'intraday_return', 'atr14', 'inflation', 'psei_returns', 'slope3', 'eps']
@@ -515,29 +517,21 @@ def main():
 def test_hyperband():
 
     # stock to be predicted
-    stock_ticker = 'BPI'
+    stock_ticker = 'AP'
 
     # parameters of each model
-    time_steps = 20
+    time_steps = 10
     train_size = 1004
     test_size = 21
 
-    dropped_features = ['slope3', 'slope4', 'wr5', 'p/e', 'intraday_return', 'atr14', 'atr5', 'lband', 'psei_returns', 'mband', 'uband', 'slope2', 'adx14', 'sentiment', 'cmf20', 'adx5', 'rsi14', 'k_values_y', 'k_values_x', 'cci20', 'cmf5', 'gdp', 'd_values_y', 'd_values_x', 'signal', 'inflation', 'volatility5', 'macd26', 'ad', 'real_interest_rate', 'slope14']
+    dropped_features = None
 
     data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=dropped_features)
+    hps = get_optimal_hps(data)
 
-    hps_list = []
+    print(hps)
 
-    for i in range(len(data)):
-        if i == 0 or i == (len(data) - 2):
-            hps_list.append(None)
-            
-        hps = get_optimal_hps(data, index=i)
-        hps_list.append(hps)
-    
-    print(stock_ticker)
-    for i in hps_list:
-        print(i)
+    return hps
 
 
 if __name__ == '__main__':
@@ -545,9 +539,14 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
+    main()
 
-    # # pruned_features = simple_feature_selection('MER', 20, 1004, 21, repeats=5)
-    # # print(f"Dropped Features: {pruned_features}")
+    # pruned_features = simple_feature_selection('ALI', 5, 1004, 42, repeats=12)
+    # print(f"Dropped Features: {pruned_features}")
 
-    test_hyperband()
+    # test_hyperband()
+
+# {'units': 256, 'layers': 4, 'dropout': 0.30000000000000004, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0},
+# {'units': 256, 'layers': 2, 'dropout': 0.1, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '14d011ef7fba9fc0559ef69491ca9076'},
+# {'units': 256, 'layers': 4, 'dropout': 0.5, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0},
+# {'units': 256, 'layers': 5, 'dropout': 0.6000000000000001, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0}
