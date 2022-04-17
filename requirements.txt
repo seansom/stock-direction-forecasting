@@ -5,3 +5,5 @@ keras-tuner
 eventregistry
 gensim
 sklearn
+pattern
+nltk
