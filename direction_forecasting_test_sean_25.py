@@ -1,4 +1,4 @@
-# no random splitting with shuffling, walk forward validation with SHITTON of indicators, hyperband
+# walk forward binary classification version with data discretization
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
@@ -6,7 +6,7 @@ import pandas as pd
 import keras_tuner as kt
 import os, sys, math, copy, random, shutil
 from sklearn.preprocessing import PowerTransformer
-from data_processing_test_sean_8 import get_dataset, inverse_transform_data
+from data_processing_test_sean_12 import get_dataset
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -18,7 +18,7 @@ class CustomCallback(keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
-        print(f'Training Progress: {curr_progress} %', end='\r')
+        print(f'Training Progress: {curr_progress} % (val_accuracy: {round(logs["val_binary_accuracy"], 6)})', end='\r')
 
     def on_train_end(self, logs=None):
         print()
@@ -36,12 +36,12 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
     # create lstm hypermodel
     for _ in range(layers):
-        lstm_hypermodel.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout))
+        lstm_hypermodel.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout, dropout=dropout))
 
-    # lstm_hypermodel.add(keras.layers.Dense(units=units / 4, activation="linear"))
-    lstm_hypermodel.add(keras.layers.Dense(units=1, activation="linear"))
+    lstm_hypermodel.add(keras.layers.Dense(units=units / 4, activation="sigmoid"))
+    lstm_hypermodel.add(keras.layers.Dense(units=1, activation="sigmoid"))
 
-    lstm_hypermodel.compile(loss='mean_squared_error', optimizer='adam')
+    lstm_hypermodel.compile(loss='binary_crossentropy', optimizer='adam', metrics=['binary_accuracy'])
 
     return lstm_hypermodel
 
@@ -63,19 +63,11 @@ def get_optimal_hps(data):
     hypermodel_builder = lambda hp: make_lstm_hypermodel(hp, time_steps, features)
 
     # if overwrite is false, previously-saved computed hps will be used
-    tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min', restore_best_weights=False)
-
-    # random.seed(0)
-    # shuffled_train_indices = list(range(train_x.shape[0]))
-    # random.shuffle(shuffled_train_indices)
-
-    # shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    # shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
-
+    tuner = kt.Hyperband(hypermodel_builder, objective='val_binary_accuracy', max_epochs=1000, factor=3, overwrite=True)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_binary_accuracy', patience=250, mode='max', restore_best_weights=True)
 
     # execute Hyperband search of optimal hyperparameters
-    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.1, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -86,27 +78,19 @@ def get_optimal_hps(data):
     return hps
 
 
+def make_lstm_model(input_shape):
 
-def make_lstm_model(input_shape, hps=None):
+    lstm_model = keras.models.Sequential([
+        keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2, dropout=0.2),
+        keras.layers.LSTM(units=256, input_shape=input_shape, return_sequences=True, recurrent_dropout=0.2, dropout=0.2),
 
-    if hps is None:
-        layers = 3
-        units = 64
-        dropout = 0.2
-    else:
-        layers = hps['layers']
-        units = hps['units']
-        dropout = hps['dropout']
+        keras.layers.Dense(units=64, activation='sigmoid'),
+        keras.layers.Dense(units=1, activation='sigmoid')
+    ])
 
-    lstm_model = keras.models.Sequential()
+    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    lstm_model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['binary_accuracy'])
 
-    for _ in range(layers):
-        lstm_model.add(keras.layers.LSTM(units=units, input_shape=input_shape, return_sequences=True, recurrent_dropout=dropout))
-
-    # lstm_model.add(keras.layers.Dense(units=(units / 4), activation='linear'))
-    lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
-
-    lstm_model.compile(loss='mean_squared_error', optimizer='adam')
     return lstm_model
 
 
@@ -114,9 +98,11 @@ def make_lstm_model(input_shape, hps=None):
 
 def forecast_lstm_model(model, test_x):
     """Forecasts future values using a model and test input dataset.
+
     Args:
         model (Model): The built Keras model used for forecasting.
         test_x (np.array): The model inputs for testing and forecasting.
+
     Returns:
         np.array: A numpy array of the forecasted future values.
     """	
@@ -145,9 +131,11 @@ def forecast_lstm_model(model, test_x):
 def get_lstm_model_perf(predictions, actuals):
     """Calculates performance metrics of a model given its predictions
     and actual future values.
+
     Args:
         predictions (np.array): A numpy array of forecasted future values.
         actuals (np.array): A numpy array of actual future values.
+
     Returns:
         dict: A dictionary containing difference performance metrics of a model.
     """	
@@ -155,14 +143,14 @@ def get_lstm_model_perf(predictions, actuals):
     predictions_len = len(predictions)
 
     # calculate number of total actual upward and downward directions
-    total_ups = sum([1 if actuals[i] >= 0 else 0 for i in range(len(actuals))])
+    total_ups = sum([1 if actuals[i] >= 0.5 else 0 for i in range(len(actuals))])
     total_downs = len(actuals) - total_ups
 
     # calculate true positives, true negatives, false positives, and false negatives
-    tp = sum([1 if (predictions[i] >= 0 and actuals[i] >= 0) else 0 for i in range(predictions_len)])
-    tn = sum([1 if (predictions[i] < 0 and actuals[i] < 0) else 0 for i in range(predictions_len)])
-    fp = sum([1 if (predictions[i] >= 0 and actuals[i] < 0) else 0 for i in range(predictions_len)])
-    fn = sum([1 if (predictions[i] < 0 and actuals[i] >= 0) else 0 for i in range(predictions_len)])
+    tp = sum([1 if (predictions[i] >= 0.5 and actuals[i] >= 0.5) else 0 for i in range(predictions_len)])
+    tn = sum([1 if (predictions[i] < 0.5 and actuals[i] < 0.5) else 0 for i in range(predictions_len)])
+    fp = sum([1 if (predictions[i] >= 0.5 and actuals[i] < 0.5) else 0 for i in range(predictions_len)])
+    fn = sum([1 if (predictions[i] < 0.5 and actuals[i] >= 0.5) else 0 for i in range(predictions_len)])
 
     # calculate directional accuracy, upward directional accuracy, and downward directional accuracy
     da = (tp + tn) / (tp + tn + fp + fn)
@@ -175,6 +163,7 @@ def get_lstm_model_perf(predictions, actuals):
 
 def print_model_performance(perf):
     """Prints out the performance metrics of a model to the terminal.
+
     Args:
         perf (dict): A dictionary containing difference performance metrics of a model.
     """	
@@ -194,17 +183,18 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(data, hps=None):
+def experiment(data):
 
     data_copy = copy.deepcopy(data)
     data_len = len(data)
     input_shape = data_copy[0]['train_x'].shape[1:]
 
+
     predictions = []
     actuals = []
 
     epochs = 100
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min', restore_best_weights=False)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_binary_accuracy', patience=250, mode='max', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     curr_directional_accuracy = 0
@@ -218,42 +208,28 @@ def experiment(data, hps=None):
         test_x = data_copy[index]['test_x']
         test_y = data_copy[index]['test_y']
 
+        lstm_model = make_lstm_model(input_shape)
+
+        # shuffled_train_indices = list(range(train_x.shape[0]))
+
         # random.seed(0)
-        shuffled_train_indices = list(range(train_x.shape[0]))
-        random.shuffle(shuffled_train_indices)
+        # random.shuffle(shuffled_train_indices)
 
-        shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-        shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+        # shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+        # shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
-        # if curr_directional_accuracy < 0.6:
-        # lstm_model.set_weights(lstm_weights)
-        # lstm_model.reset_states()
+        lstm_model.fit(train_x, train_y, epochs=1000, validation_split=0.1, verbose=1, callbacks=[early_stopping_callback])
 
-        lstm_model = make_lstm_model(input_shape, hps)
+        curr_predictions = list(forecast_lstm_model(lstm_model, test_x))
+        curr_actuals = [test_y[i, -1] for i in range(len(test_y))]
 
-        history = lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
-    
-        # while True:
-        #     if len(history.history['loss']) < 25:
-        #         lstm_model = make_lstm_model(input_shape)
-        #         lstm_weights = lstm_model.get_weights()
-        #         history = lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=epochs, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
-        #     else:
-        #         break
-
-        curr_predictions = forecast_lstm_model(lstm_model, test_x)
-        curr_actuals = np.array([test_y[i, -1] for i in range(len(test_y))])
-
-        curr_scaler = data_copy[index]['scaler']
-        curr_col_names = data_copy[index]['col_names']
-
-        curr_predictions = list(inverse_transform_data(curr_predictions, curr_scaler, curr_col_names, feature="log_return"))
-        curr_actuals = list(inverse_transform_data(curr_actuals, curr_scaler, curr_col_names, feature="log_return"))
+        print(curr_predictions)
+        print(curr_actuals)
 
         predictions = predictions + curr_predictions
         actuals = actuals + curr_actuals
 
-        correct_predictions_num = sum([1 if (curr_predictions[i] >= 0 and curr_actuals[i] >= 0) or (curr_predictions[i] < 0 and curr_actuals[i] < 0) else 0 for i in range(len(curr_predictions))])
+        correct_predictions_num = sum([1 if (curr_predictions[i] >= 0.5 and curr_actuals[i] >= 0.5) or (curr_predictions[i] < 0.5 and curr_actuals[i] < 0.5) else 0 for i in range(len(curr_predictions))])
         curr_directional_accuracy = correct_predictions_num / len(curr_predictions)
         print(f"Batch DA: {round(curr_directional_accuracy, 6)}")
 
@@ -356,13 +332,13 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
     data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=None)
 
     features = data[0]['col_names'].copy()
-    correlations = data[0]['correlations'].copy()
+    mutual_infos = data[0]['mutual_infos'].copy()
 
     stock_returns_index = features.index('log_return')
     features.remove('log_return')
-    correlations.pop(stock_returns_index)
+    mutual_infos.pop(stock_returns_index)
 
-    features = [x for _, x in sorted(zip(correlations, features), reverse=True)]
+    features = [x for _, x in sorted(zip(mutual_infos, features), reverse=True)]
 
     num_features = len(features)
     dropped_features = features.copy()
@@ -444,21 +420,25 @@ def main():
     stock_ticker = 'ALI'
 
     # parameters of each model
-    time_steps = 20
-    train_size = 974
-    test_size = 21
-
-    hps = {'units': 256, 'layers': 2, 'dropout': 0.30000000000000004, 'tuner/epochs': 4, 'tuner/initial_epoch': 2, 'tuner/bracket': 4, 'tuner/round': 1, 'tuner/trial_id': '610dce297d2efc56380911c6ecb103c5'}
+    time_steps = 10
+    train_size = 1004
+    test_size = 10
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 4
 
     # dropped features
-    dropped_features = ['intraday_return', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y']
-    # PGOLD ['atr14', 'slope2', 'wr14', 'lband', 'p/e', 'k_values_y', 'k_values_x', 'rsi5', 'wr5', 'slope3', 'adx14', 'mband', 'd_values_y', 'd_values_x', 'psei_returns', 'volatility5', 'rsi14', 'cmf5', 'uband', 'eps', 'sentiment', 'slope4', 'signal', 'adx5', 'slope14', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe']
-    # AP ['rsi5', 'slope2', 'slope4', 'ad', 'rsi14', 'wr14', 'slope5', 'cmf5', 'cci20', 'macd26', 'slope14', 'k_values_x', 'adx14', 'cmf20', 'signal', 'p/e', 'adx5', 'atr5', 'volatility5', 'd_values_y', 'd_values_x', 'uband', 'mband', 'lband', 'atr14', 'psei_returns', 'eps', 'roe', 'inflation']
-    # ALI ['divergence', 'lband', 'p/e', 'mband', 'wr5', 'uband', 'wr14', 'k_values_x', 'd_values_y', 'd_values_x', 'rsi5', 'macd26', 'rsi14', 'ad', 'atr5', 'cmf20', 'real_interest_rate', 'sentiment', 'slope2', 'slope5', 'signal', 'gdp', 'cci5', 'adx14', 'slope4', 'adx5', 'intraday_return', 'atr14', 'inflation', 'psei_returns', 'slope3', 'eps']
-    # BPI ['slope3', 'slope4', 'wr5', 'p/e', 'intraday_return', 'atr14', 'atr5', 'lband', 'psei_returns', 'mband', 'uband', 'slope2', 'adx14', 'sentiment', 'cmf20', 'adx5', 'rsi14', 'k_values_y', 'k_values_x', 'cci20', 'cmf5', 'gdp', 'd_values_y', 'd_values_x', 'signal', 'inflation', 'volatility5', 'macd26', 'ad', 'real_interest_rate', 'slope14']
+    dropped_features = None
+    ['slope3', 'slope4', 'wr5', 'p/e', 'intraday_return', 'atr14', 'atr5', 'lband', 'psei_returns', 'mband', 'uband', 'slope2', 'adx14', 'sentiment', 'cmf20', 'adx5', 'rsi14', 'k_values_y', 'k_values_x', 'cci20', 'cmf5', 'gdp', 'd_values_y', 'd_values_x', 'signal', 'inflation', 'volatility5', 'macd26', 'ad', 'real_interest_rate', 'slope14']
+    # ALI ['lband', 'p/e', 'mband', 'uband', 'wr5', 'k_values_y', 'k_values_x', 'd_values_y', 'd_values_x', 'macd26', 'rsi14', 'rsi5', 'cmf20', 'atr5', 'roe', 'signal', 'slope2', 'slope5', 'adx14', 'cci20', 'cci5', 'gdp', 'slope4', 'adx5', 'inflation', 'intraday_return', 'psei_returns', 'atr14', 'slope3', 'eps']
+    ['divergence', 'lband', 'p/e', 'mband', 'wr5', 'uband', 'wr14', 'k_values_x', 'd_values_y', 'd_values_x', 'rsi5', 'macd26', 'rsi14', 'ad', 'atr5', 'cmf20', 'real_interest_rate', 'sentiment', 'slope2', 'slope5', 'signal', 'gdp', 'cci5', 'adx14', 'slope4', 'adx5', 'intraday_return', 'atr14', 'inflation', 'psei_returns', 'slope3', 'eps']
+
+    # AP (1, 1004, 21) ['wr', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'p/e', 'psei_returns', 'sentiment']
+    # ALI (1, 1004, 21) ['volume', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'sentiment']
+    # PGOLD (1, 1004, 21) ['ad', 'wr', 'cmf', 'atr14', 'rsi14', 'cci20', 'adx14', 'slope14', 'k_values_x', 'd_values_x', 'macd26', 'signal', 'divergence', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'mband', 'lband', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e']
+    # BPI (1, 1004, 21) ['cmf20', 'cmf5', 'atr14', 'adx14', 'k_values_x', 'signal', 'divergence', 'slope2', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+
+    ['cmf5', 'volume', 'lband', 'p/e', 'close', 'adjusted_close', 'mband', 'open', 'high', 'low', 'uband', 'k_values_y', 'k_values_x', 'd_values_y', 'd_values_x', 'macd26', 'rsi14', 'rsi5', 'cmf20', 'atr5', 'roe', 'real_interest_rate', 'signal', 'slope2', 'sentiment', 'slope5', 'adx14', 'cci20', 'cci5', 'gdp', 'adx5', 'inflation', 'psei_returns', 'atr14', 'slope3', 'eps']
 
     # ALL ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
@@ -469,7 +449,7 @@ def main():
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(data, hps)
+        perf, _, _ = experiment(data)
         performances.append(perf)
         print_model_performance(perf)
         print("===================================================")
@@ -512,157 +492,32 @@ def main():
 
 
 
-def test_hyperband():
-
+def test():
     # stock to be predicted
     stock_ticker = 'BPI'
 
     # parameters of each model
     time_steps = 10
     train_size = 1004
-    test_size = 21
+    test_size = 5
 
+    # dropped features
     dropped_features = None
 
     data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, train_size=train_size, test_size=test_size, drop_col=dropped_features)
+
     hps = get_optimal_hps(data)
 
     print(hps)
-
-    return hps
-
-
-def test_final_models():
-
-    # stock to be predicted
-    stock_ticker = 'ALI'
-
-    repeats = 10
-
-    # parameters of each model
-    time_steps_list = [1, 5, 10, 15, 20]
-    train_size_list = [973, 970, 966, 962, 958]
-    test_size = 1
-
-    date_range = ('2017-04-21', '2022-04-21')
-
-    dropped_features = ['intraday_return', 'slope2', 'slope3', 'slope4', 'slope5', 'volatility5', 'uband', 'mband', 'lband', 'atr5', 'rsi5', 'cci5', 'adx5', 'k_values_y', 'd_values_y']
-
-
-    if stock_ticker == 'ALI':
-        hps_list = [
-            {'units':32, 'layers':1, 'dropout':0.5},
-            {'units':32, 'layers':1, 'dropout':0.7},
-            {'units':256, 'layers':2, 'dropout':0.3},
-            {'units':256, 'layers':5, 'dropout':0.6},
-            {'units':256, 'layers':2, 'dropout':0.1},
-        ]
-    elif stock_ticker == 'AP':
-        hps_list = [
-            {'units':32, 'layers':2, 'dropout':0.5},
-            {'units':64, 'layers':4, 'dropout':0.4},
-            {'units':256, 'layers':2, 'dropout':0.2},
-            {'units':256, 'layers':4, 'dropout':0.1},
-            {'units':256, 'layers':2, 'dropout':0.2},
-        ]
-
-    answers = []
-
-    for index in range(len(time_steps_list)):
-
-        data = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps_list[index], train_size=train_size_list[index], test_size=test_size, drop_col=dropped_features)
-        data = data[-47:]
-
-        print("===================================================")
-        performances = []
-
-        for i in range(repeats):
-            print(f'Time Steps: {time_steps_list[index]}')
-            print(f"Experiment {i + 1} / {repeats}")
-            perf, _, _ = experiment(data, hps=hps_list[index])
-            performances.append(perf)
-            print_model_performance(perf)
-            print("===================================================")
-
-        mean_da = mean([perf['da'] for perf in performances])
-        mean_uda = mean([perf['uda'] for perf in performances])
-        mean_dda = mean([perf['dda'] for perf in performances])
-
-        std_da = stdev([perf['da'] for perf in performances])
-        std_uda = stdev([perf['uda'] for perf in performances])
-        std_dda = stdev([perf['dda'] for perf in performances])
-        
-        optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
-        pessimistic_baseline = 1 - optimistic_baseline
-
-        answer = {
-            'time_steps':time_steps_list[index],
-            'mean_da':mean_da,
-            'mean_uda':mean_uda,
-            'mean_dda':mean_dda,
-            'std_da':std_da,
-            'std_uda':std_uda,
-            'std_dda':std_dda,
-            'optimistic_baseline':optimistic_baseline,
-            'pessimistic_baseline':pessimistic_baseline
-        }
-
-        answers.append(answer)
-
-
-        print(f'Stock: {stock_ticker}')
-
-        print()
-        
-        print(f'Total Ups: {performances[0]["total_ups"]}')
-        print(f'Total Downs: {performances[0]["total_downs"]}')
-
-        print()
-
-        # Print average accuracies of the built models
-        print(f"Mean DA: {round(mean_da, 6)}")
-        print(f"Mean UDA: {round(mean_uda, 6)}")
-        print(f"Mean DDA: {round(mean_dda, 6)}")
-
-        print()
-
-        print(f"Standard Dev. DA: {round(std_da, 6)}")
-        print(f"Standard Dev. UDA: {round(std_uda, 6)}")
-        print(f"Standard Dev. DDA: {round(std_dda, 6)}")
-
-        print()
-
-        print(f"Optimistic Baseline DA: {round(optimistic_baseline, 6)}")
-        print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
-
-    
-    for i in answers:
-        print(i)
-
-    
-
-
-
-
-
 
 
 
 if __name__ == '__main__':
 
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
+    main()
 
-    test_final_models()
-
-    # pruned_features = simple_feature_selection('ALI', 5, 1004, 42, repeats=12)
-    # print(f"Dropped Features: {pruned_features}")
-
-    # test_hyperband()
-
-# {'units': 256, 'layers': 4, 'dropout': 0.30000000000000004, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0},
-# {'units': 256, 'layers': 2, 'dropout': 0.1, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '14d011ef7fba9fc0559ef69491ca9076'},
-# {'units': 256, 'layers': 4, 'dropout': 0.5, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0},
-# {'units': 256, 'layers': 5, 'dropout': 0.6000000000000001, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0}
+    # test()

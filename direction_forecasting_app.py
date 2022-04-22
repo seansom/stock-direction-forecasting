@@ -6,19 +6,23 @@ import numpy as np
 import pandas as pd
 import os, sys, math, copy, shutil
 from sklearn.preprocessing import PowerTransformer
-from data_processing import get_dataset, inverse_transform_data
+from data_processing_app import get_dataset, inverse_transform_data, get_dates_five_years
 
 
 class CustomCallback(keras.callbacks.Callback):
     """A callback class used to print the progress of model fitting
     after each epoch.
     """	
-    def __init__(self, epochs):
+    def __init__(self, epochs, window=None):
         self.epochs = epochs
+        self.window = window
 
     def on_epoch_end(self, epoch, logs=None):
         curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
         print(f'Training Progress: {curr_progress} %', end='\r')
+
+        if self.window is not None:
+            self.window.ui.train_progress_label.setText(f'{curr_progress} %')
 
     def on_train_end(self, logs=None):
         print()
@@ -71,7 +75,7 @@ def get_optimal_hps(train_x, train_y):
     return hps
 
 
-def make_lstm_model(train_x, train_y, epochs=100, hps=None):
+def make_lstm_model(train_x, train_y, epochs=100, hps=None, window=None):
 
     if hps is None:
         layers = 3
@@ -89,7 +93,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
 
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
-    print_train_progress_callback = CustomCallback(epochs)
+    print_train_progress_callback = CustomCallback(epochs, window)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
     lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
@@ -97,7 +101,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     return lstm_model
 
 
-def forecast_lstm_model(model, test_x):
+def forecast_lstm_model(model, test_x, window=None):
     """Forecasts future values using a model and test input dataset.
 
     Args:
@@ -117,6 +121,9 @@ def forecast_lstm_model(model, test_x):
     for i in range(test_len):
         curr_progress = round(((i + 1) / test_len) * 100, 2)
         print(f'Prediction Progress: {curr_progress} %', end='\r')
+
+        if window is not None:
+            window.ui.prediction_progress_label.setText(f'{curr_progress} %')
 
         model_input = (test_x[i, :, :]).reshape(1, test_timesteps, test_features)
         prediction = model.predict(model_input)
@@ -184,7 +191,7 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
+def experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps=None, window=None):
 
     train_x_copy = copy.deepcopy(train_x)
     train_y_copy = copy.deepcopy(train_y)
@@ -192,10 +199,12 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
     test_y_copy = copy.deepcopy(test_y)
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100, hps=hps)
+    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100, hps=hps, window=window)
 
     # get the model predictions
-    predictions = forecast_lstm_model(lstm_model, test_x_copy)
+    predictions = forecast_lstm_model(lstm_model, test_x_copy, window=window)
+
+    final_prediction = forecast_lstm_model(lstm_model, final_window)
 
     # test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
     test_y_copy = np.array([test_y_copy[i, -1] for i in range(len(test_y_copy))])
@@ -203,33 +212,37 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
     # revert the normalization scalings done
     test_y_copy = inverse_transform_data(test_y_copy, scaler, col_names, feature="log_return")
     predictions = inverse_transform_data(predictions, scaler, col_names, feature="log_return")
+    final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="log_return")
+    final_prediction = [i.tolist() for i in final_prediction]
 
     # get model performance statistics
     perf = get_lstm_model_perf(predictions, test_y_copy)
 
-    return perf, test_y_copy, predictions
+    return perf, test_y_copy, predictions, final_prediction
 
 
 def main():
     # stock to be predicted
-    stock_ticker = 'JFC'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 20
     hps = None
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 5
 
     
     print("===================================================")
     performances = []
+    final_predictions = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
-        perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps)
+        scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=time_steps, drop_col=None)
+        perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps)
         performances.append(perf)
+        final_predictions.append(final_prediction)
         print("===================================================")
 
     mean_da = mean([perf['da'] for perf in performances])
@@ -271,100 +284,4 @@ def main():
     print(f"Optimistic Baseline DA: {round(optimistic_baseline, 6)}")
     print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
 
-
-
-def get_hps():
-    # stock to be predicted
-    stock_ticker = 'BPI'
-
-    # parameters of each model
-    time_steps_list = [1, 5, 10]
-
-    hps_list = []
-
-    for time_steps in time_steps_list:
-        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
-        hps = get_optimal_hps(train_x, train_y)
-
-        hps_list.append(hps)
-
-    for i in hps_list:
-        print(i)
-
-    return hps_list
-
-
-def batch_test(hps_list=None):
-    # stock to be predicted
-    stock_ticker = 'BPI'
-
-    repeats = 10
-
-    # parameters of each model
-    time_steps_list = [1, 5, 10]
-
-    if hps_list is None:
-        hps_list = [
-            {'units': 32, 'layers': 2, 'dropout': 0.5, 'tuner/epochs': 12, 'tuner/initial_epoch': 4, 'tuner/bracket': 3, 'tuner/round': 1, 'tuner/trial_id': 'f21b5fc16b5ae6fb9dec7d84c85edf3c'},
-            {'units': 64, 'layers': 4, 'dropout': 0.4, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0},
-            {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '5f9fce38199554b56f763489b9ee4823'},
-            {'units': 256, 'layers': 4, 'dropout': 0.1, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 2, 'tuner/round': 2, 'tuner/trial_id': '383b806f73b959f1f2c0e1af7e653d26'},
-            {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '30698f8a9d4cef06d6b783dba9734f78'}
-        ]
-
-    # hps_list = [
-    #     {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '6bdb16b6d5b090d7c064a083dc55f774'}
-    # ]
-
-    perfs = []
-
-    for i in range(len(time_steps_list)):
-
-        time_steps = time_steps_list[i]
-        hps = hps_list[i]
-
-        curr_performances = []
-
-        for _ in range(repeats):
-            scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
-            perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=hps)
-            curr_performances.append(perf)
-
-        mean_da = mean([perf['da'] for perf in curr_performances])
-        mean_uda = mean([perf['uda'] for perf in curr_performances])
-        mean_dda = mean([perf['dda'] for perf in curr_performances])
-
-        std_da = stdev([perf['da'] for perf in curr_performances])
-        std_uda = stdev([perf['uda'] for perf in curr_performances])
-        std_dda = stdev([perf['dda'] for perf in curr_performances])
-
-        mean_total_ups = mean([perf['total_ups'] for perf in curr_performances])
-        mean_total_downs = mean([perf['total_downs'] for perf in curr_performances])
-        
-        optimistic_baseline = mean_total_ups / (mean_total_ups + mean_total_downs)
-        pessimistic_baseline = 1 - optimistic_baseline
-
-        perfs.append((time_steps, {
-            'mean_da' : mean_da,
-            'mean_uda' : mean_uda,
-            'mean_dda' : mean_dda,
-            'std_da' : std_da,
-            'std_uda' : std_uda,
-            'std_dda' : std_dda,
-            'optimistic_baseline' : optimistic_baseline,
-            'pessimistic_baseline' : pessimistic_baseline,
-        }))
-
-    for i in perfs:
-        print(i)
-
-    for i in hps_list:
-        print(i)
-
-if __name__ == '__main__':
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-    compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
-
-    # main()
-    hps_list = get_hps()
-    batch_test(hps_list)
+    print(f'Final Predictions: {final_predictions}')
