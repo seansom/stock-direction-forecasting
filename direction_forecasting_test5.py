@@ -3,8 +3,8 @@ from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import keras_tuner as kt
-import os, sys, math, warnings, shutil
-from data_processing_old import get_dataset, inverse_transform_data
+import os, sys, math, warnings, shutil, random
+from data_processing_old_3 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -57,7 +57,7 @@ def get_optimal_hps(train_x, train_y):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
-    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.0526, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -88,7 +88,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.0526,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -193,12 +193,19 @@ def experiment(stock_ticker, time_steps, drop_col=None, test_on_val=False, hps=N
         dict: A dictionary of the performance metrics of the created model.
     """
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=drop_col)
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
 
     if test_on_val:
-        test_len = train_x.shape[0] * 25 // 100
+        test_len = train_x.shape[0] * 5026 // 100000
         test_x = train_x[-test_len:]
         test_y = train_y[-test_len:]
+
+    # random.seed(0)
+    # shuffled_train_indices = list(range(train_x.shape[0]))
+    # random.shuffle(shuffled_train_indices)
+
+    # train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    # train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
     # create, compile, and fit an lstm model
     lstm_model = make_lstm_model(train_x, train_y, epochs=100, hps=hps)
@@ -351,10 +358,10 @@ def forward_feature_selection(stock_ticker, time_steps, repeats=10, hps=None):
     return dropped_features
 
 
-def get_hps(stock_ticker, dropped_features=None):
+def get_hps(stock_ticker, time_steps_list, dropped_features=None):
 
     # parameters of each model
-    time_steps_list = [1, 5, 10, 15, 20]
+    # time_steps_list = [1, 5, 10, 15, 20]
 
     #['cmf', 'atr', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
@@ -364,7 +371,7 @@ def get_hps(stock_ticker, dropped_features=None):
     hps_list = []
 
     for index, time_steps in enumerate(time_steps_list):
-        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features[index])
+        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
         hps = get_optimal_hps(train_x, train_y)
         hps_list.append(hps)
 
@@ -377,35 +384,26 @@ def get_hps(stock_ticker, dropped_features=None):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'ALI'
+    stock_ticker = 'AP'
 
     # parameters of each model
-    time_steps = 1
+    time_steps = 20
 
-    hps = {'units': 32, 'layers': 1, 'dropout': 0.2, 'tuner/epochs': 12, 'tuner/initial_epoch': 0, 'tuner/bracket': 2, 'tuner/round': 0}
-    hps = None
+    hps = {'units': 64, 'layers': 3, 'dropout': 0.6, 'tuner/epochs': 4, 'tuner/initial_epoch': 0, 'tuner/bracket': 3, 'tuner/round': 0}
 
     # how many models built (min = 2)
-    repeats = 10
+    repeats = 3
 
     # dropped features
-    dropped_features = ['cmf', 'atr', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    ['cmf', 'atr', 'k_values', 'macd', 'signal', 'divergence', 'gdp', 'real_interest_rate']
+    dropped_features = None#['wr', 'cmf', 'atr', 'rsi', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'p/e', 'psei_returns', 'sentiment']
 
-    ['cmf', 'atr', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    ['cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    ['wr', 'cmf', 'atr', 'adx', 'slope', 'k_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
-    
-
-    
-    #bpi best ['wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'gdp', 'real_interest_rate', 'roe', 'psei_returns']
     
     print("===================================================")
     performances = []
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _ = experiment(stock_ticker, time_steps, drop_col=dropped_features, hps=hps)
+        perf, _, _ = experiment(stock_ticker, time_steps, drop_col=dropped_features, hps=hps, test_on_val=False)
         performances.append(perf)
         print("===================================================")
 
@@ -447,9 +445,9 @@ def main():
 
 
 
-def batch_test(stock_ticker, dropped_features=None, hps_list=None):
+def batch_test(stock_ticker, time_steps, dropped_features=None, hps_list=None):
 
-    time_steps = [1, 5, 10, 15, 20]
+    # time_steps = [1, 5, 10, 15, 20]
     repeats = 10
 
     if dropped_features is None:
@@ -526,20 +524,25 @@ if __name__ == '__main__':
     # main()
     # visualize_returns('BPI')
 
-    # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
 
-    stock_ticker = 'MER'
+    stock_ticker = 'AP'
 
     dropped_features = []
-    time_steps = [1, 5, 10, 15, 20]
+    time_steps = [1, 10, 20]
 
     for step in time_steps:
         curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
 
-    hps_list = get_hps(stock_ticker, dropped_features)
+    print(dropped_features)
 
-    batch_test(stock_ticker, dropped_features, hps_list)
+    hps_list = get_hps(stock_ticker, time_steps, dropped_features)
+
+    print('===============')
+    print(dropped_features)
+    print(hps_list)
+
+    batch_test(stock_ticker, time_steps, dropped_features, hps_list)
     print('===============')
     print(dropped_features)
     print(hps_list)

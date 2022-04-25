@@ -211,6 +211,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     if data['date'][0] != date_range[0]:
         raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
 
+
     return data
 
 
@@ -237,7 +238,7 @@ def get_technical_data(stock_ticker, date_range):
 
     # adjust and add days to first trading day to be able to compute indicators with periods
     first_trading_day_datetime = datetime.datetime.strptime(first_trading_day,'%Y-%m-%d')
-    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
+    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=40)).strftime('%Y-%m-%d')
 
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={last_trading_day}"
@@ -1042,8 +1043,13 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     feature_selection_train_x = train.to_numpy()[:-1]
     feature_selection_train_y = train.to_numpy()[1:, stock_returns_index]
 
-    mutual_infos = r_regression(feature_selection_train_x, feature_selection_train_y)
+    mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y, random_state=0)
     mutual_infos = [round(abs(i), 6) for i in mutual_infos]
+
+    print(data)
+    print(list(data))
+    print(mutual_infos)
+    sys.exit()
 
     # col_names = list(train)
     # print([(col_names[i], mutual_infos[i]) for i in range(len(col_names))])

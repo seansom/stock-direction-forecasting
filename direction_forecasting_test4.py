@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import keras_tuner as kt
 import os, sys, math, warnings, shutil
-from data_processing_old import get_dataset, inverse_transform_data
+from data_processing_old_2 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -193,7 +193,7 @@ def experiment(stock_ticker, time_steps, drop_col=None, test_on_val=False, hps=N
         dict: A dictionary of the performance metrics of the created model.
     """
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=drop_col)
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
 
     if test_on_val:
         test_len = train_x.shape[0] * 25 // 100
@@ -351,6 +351,55 @@ def forward_feature_selection(stock_ticker, time_steps, repeats=10, hps=None):
     return dropped_features
 
 
+def backward_feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
+    
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    num_features = len(features)
+    dropped_features = []
+
+    print("===================================================")
+    print("Starting Feature Selection...")
+    print(f"Features Tested: 0/{num_features} (current dropped: {dropped_features})")
+    
+
+    model_perfs = []
+    for _ in range(repeats):
+        curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=None, test_on_val=True, hps=hps)
+        model_perfs.append(curr_model_perf['da'])
+
+    curr_best_da = mean(model_perfs)
+    
+    print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
+    print(f"Current Features: {features}")
+    print("===================================================")
+
+
+    for index, feature in enumerate(features):
+
+        model_perfs = []
+        dropped_features.append(feature)
+
+        print(f"Features Tested: {index + 1}/{num_features} (current dropped: {dropped_features})")
+
+        for _ in range(repeats):
+            curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=dropped_features, test_on_val=True, hps=hps)
+            model_perfs.append(curr_model_perf['da'])
+
+        curr_da = mean(model_perfs)
+
+        if curr_da > curr_best_da:
+            curr_best_da = curr_da
+        else:
+            dropped_features.remove(feature)
+
+        print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+        print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+        
+        print(f"Current Features: {[feature for feature in features if feature not in dropped_features]}")
+        print("===================================================")
+
+    return dropped_features
+
 def get_hps(stock_ticker, dropped_features=None):
 
     # parameters of each model
@@ -364,7 +413,7 @@ def get_hps(stock_ticker, dropped_features=None):
     hps_list = []
 
     for index, time_steps in enumerate(time_steps_list):
-        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features[index])
+        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
         hps = get_optimal_hps(train_x, train_y)
         hps_list.append(hps)
 
@@ -382,23 +431,14 @@ def main():
     # parameters of each model
     time_steps = 1
 
-    hps = {'units': 32, 'layers': 1, 'dropout': 0.2, 'tuner/epochs': 12, 'tuner/initial_epoch': 0, 'tuner/bracket': 2, 'tuner/round': 0}
-    hps = None
+    hps = {'units': 32, 'layers': 1, 'dropout': 0.6000000000000001, 'tuner/epochs': 4, 'tuner/initial_epoch': 2, 'tuner/bracket': 4, 'tuner/round': 1, 'tuner/trial_id': 'e1a4724beb94b41054479c8b543ceda2'}
 
     # how many models built (min = 2)
     repeats = 10
 
     # dropped features
-    dropped_features = ['cmf', 'atr', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    ['cmf', 'atr', 'k_values', 'macd', 'signal', 'divergence', 'gdp', 'real_interest_rate']
+    dropped_features = None
 
-    ['cmf', 'atr', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    ['cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    ['wr', 'cmf', 'atr', 'adx', 'slope', 'k_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'psei_returns', 'sentiment']
-    
-
-    
-    #bpi best ['wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'gdp', 'real_interest_rate', 'roe', 'psei_returns']
     
     print("===================================================")
     performances = []
@@ -528,13 +568,13 @@ if __name__ == '__main__':
 
     # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
 
-    stock_ticker = 'MER'
+    stock_ticker = 'ALI'
 
     dropped_features = []
     time_steps = [1, 5, 10, 15, 20]
 
     for step in time_steps:
-        curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
+        curr_dropped_features = backward_feature_selection(stock_ticker, step, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
 
     hps_list = get_hps(stock_ticker, dropped_features)

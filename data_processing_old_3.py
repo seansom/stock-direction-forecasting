@@ -1,12 +1,24 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import datetime, requests, json, math, shelve, sys, os, re, pathlib
+from sklearn.feature_selection import mutual_info_classif, r_regression, mutual_info_regression
+
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
-import datetime, requests, json, math, shelve, sys, os, re, pathlib, random
+
+def requests_get(url):
+
+    while True:
+        try:
+            return requests.get(url, timeout=10)
+        except requests.exceptions.Timeout:
+            print('Timeout. Restarting request...')
+            continue
+
 
 #get_technical_data START
 def get_dates_five_years(testing=False):
@@ -45,7 +57,7 @@ def get_trading_dates(stock_ticker, date_range, token):
         exchange = 'PSE'
         url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
 
-        response = requests.get(url)
+        response = requests_get(url)
         data = response.json()
 
         # convert to pd.dataframe
@@ -96,7 +108,7 @@ def get_technical_indicators(data):
         ad.append(curr_ad)
 
     # compute William's %R indicator values
-    wr_period = 14
+    wr_period = 5
     wr = [np.NaN] * (wr_period - 1)
 
     for i in range(wr_period, data_len + 1):
@@ -111,7 +123,7 @@ def get_technical_indicators(data):
         wr.append(curr_wr)
 
     # compute Chaulkin Money Flow indicator
-    cmf_period = 20
+    cmf_period = 5
 
     mfv = []
     cmf = [np.NaN] * (cmf_period - 1)
@@ -171,7 +183,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     
     url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
 
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -199,6 +211,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     if data['date'][0] != date_range[0]:
         raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
 
+
     return data
 
 
@@ -225,12 +238,12 @@ def get_technical_data(stock_ticker, date_range):
 
     # adjust and add days to first trading day to be able to compute indicators with periods
     first_trading_day_datetime = datetime.datetime.strptime(first_trading_day,'%Y-%m-%d')
-    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
+    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=40)).strftime('%Y-%m-%d')
 
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={last_trading_day}"
-    
-    response = requests.get(url)
+
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -257,10 +270,11 @@ def get_technical_data(stock_ticker, date_range):
     data = data.reset_index(drop=True)
 
     # get available technical indicators from API. format: (indicator, period)
-    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
+    EOD_indicators = [('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('slope', 5), ('stochastic', 5), ('macd', 5)]
+
 
     for indicator, period in EOD_indicators:
-        print(indicator, period)
+        # print(indicator, period)
         indicator_data = get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
         data = data.merge(indicator_data, on='date')
 
@@ -290,7 +304,7 @@ def get_fundamental_trading_dates(stock_ticker, date_range, token):
     exchange = 'PSE'
 
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -324,7 +338,7 @@ def get_psei_returns(date_range, token):
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
 
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}"
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -382,7 +396,7 @@ def get_fundamental_indicator_from_EOD(stock_ticker, token):
     exchange = 'PSE'
 
     url = f"https://eodhistoricaldata.com/api/fundamentals/{stock_ticker}.{exchange}?api_token={token}"
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     return data
@@ -406,9 +420,9 @@ def get_macro_indicator_from_EOD(token, date_range):
     infl_url = f"https://eodhistoricaldata.com/api/macro-indicator/{country_code}?api_token={token}&fmt=json&indicator=inflation_consumer_prices_annual"
     intrst_url = f"https://eodhistoricaldata.com/api/macro-indicator/{country_code}?api_token={token}&fmt=json&indicator=real_interest_rate"
     
-    gdp_data = requests.get(gdp_url).json()
-    infl_data = requests.get(infl_url).json()
-    intrst_data = requests.get(intrst_url).json()
+    gdp_data = requests_get(gdp_url).json()
+    infl_data = requests_get(infl_url).json()
+    intrst_data = requests_get(intrst_url).json()
 
     gdp_data = pd.json_normalize(gdp_data)
     infl_data = pd.json_normalize(infl_data)
@@ -890,8 +904,10 @@ def get_sentimental_data (stock_ticker, date_range):
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
+    
     Args:
         data (pd.DataFrame): The entire dataset.
+
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """	
@@ -905,7 +921,7 @@ def scale_data(data):
     return data
 
 
-def train_test_split(data, time_steps):
+def train_test_split(data, time_steps=1):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -914,44 +930,21 @@ def train_test_split(data, time_steps):
 
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
-    """	
+    """
     
-    data_len = len(data)
+    test_len = (len(data) - time_steps) * 5 // 100
 
-    final_window = data.tail(time_steps)
+    train, test = data[:-test_len], data[-test_len - time_steps:]
     
-    target_indices = list(range(time_steps, data_len))
-    test_len = len(target_indices) * 2 // 10
-
-    # random.seed(0)
-    random.shuffle(target_indices)
-
-    train_targets = sorted(target_indices[:-test_len])
-    test_targets = sorted(target_indices[-test_len:])
-
-    train_indices = []
-    test_indices = []
-
-    for i in range(len(train_targets)):
-        for j in range(train_targets[i] - time_steps, train_targets[i] + 1):
-            if j not in train_indices:
-                train_indices.append(j)
-    
-    for i in range(len(test_targets)):
-        for j in range(test_targets[i] - time_steps, test_targets[i] + 1):
-            if j not in test_indices:
-                test_indices.append(j)
-
-    train_indices = sorted(train_indices)
-    test_indices = sorted(test_indices)
-
-    train_set = data.loc[train_indices]
-    test_set = data.loc[test_indices]
-
-    return train_set, test_set, train_targets, test_targets, train_indices, test_indices, final_window
+    # print(len(data))
+    # print(test_len, time_steps)
+    # print(len(train))
+    # print(len(test))
+    # sys.exit()
+    return train, test
 
 
-def transform_data(train, test, final_window):
+def transform_data(train, test):
     """Applies Yeo-Johnson transformation to train and test datasets. 
     Each column or feature in the dataset is standardized separately.
 
@@ -972,7 +965,6 @@ def transform_data(train, test, final_window):
     # Apply Yeo-Johnson Transform
     train = scaler.fit_transform(train)
     test = scaler.transform(test)
-    final_window = scaler.transform(final_window)
 
     # scale down outliers in train and test data
     for row in range(train.shape[0]):
@@ -989,19 +981,11 @@ def transform_data(train, test, final_window):
             elif test[row, col] < -4.5:
                 test[row, col] = -4.5
 
-    for row in range(final_window.shape[0]):
-        for col in range(col_num):
-            if final_window[row, col] > 4.5:
-                final_window[row, col] = 4.5
-            elif final_window[row, col] < -4.5:
-                final_window[row, col] = -4.5
-
     # reconvert to dataframes
     train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
     test = pd.DataFrame({col: test[:, i] for i, col in enumerate(col_names)})
-    final_window = pd.DataFrame({col: final_window[:, i] for i, col in enumerate(col_names)})
 
-    return scaler, train, test, final_window, col_names
+    return scaler, train, test, col_names
 
 
 def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
@@ -1025,7 +1009,7 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col=None):
+def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None, time_steps=1):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1054,23 +1038,37 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     # raise exception if missing/null value is found in the combined dataset
     if data.isnull().values.any():
         raise Exception(f'Null value found in combined dataset.')
-
-    # print(data)
     
     #scale data
     scaled_data = scale_data(data)
 
     #split data into train and test
-    train, test, train_targets, test_targets, train_indices, test_indices, final_window = train_test_split(scaled_data, time_steps)
+    train, test = train_test_split(scaled_data, time_steps)
+
+    stock_returns_index = train.columns.get_loc("log_return")
+
+    feature_selection_train_x = train.to_numpy()[:-1]
+    feature_selection_train_y = train.to_numpy()[1:, stock_returns_index]
+
+    mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y, random_state=0)
+    mutual_infos = [round(abs(i), 6) for i in mutual_infos]
+
+    # print(data)
+    # print(list(data))
+    # print(mutual_infos)
+    # sys.exit()
+
+    # col_names = list(train)
+    # print([(col_names[i], mutual_infos[i]) for i in range(len(col_names))])
+    # sys.exit()
     
     #apply Yeo-Johnson Power Transfrom
-    scaler, train, test, final_window, col_names = transform_data(train, test, final_window)
+    scaler, train, test, col_names = transform_data(train, test)
 
-    return scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices, final_window
+    return scaler, train, test, col_names
 
 
-
-def make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps=1):
+def make_data_window(train, test, time_steps=1):
     """Creates data windows for the train and test datasets.
     Splits train and test datasets into train_x, train_y, test_x,
     and test_y datasets. The _x datasets represent model input datasets
@@ -1096,33 +1094,32 @@ def make_data_window(train, test, train_targets, test_targets, train_indices, te
     train = train.to_numpy()
     test = test.to_numpy()
 
+    train_len = train.shape[0]
+    test_len = test.shape[0]
+
     # x values: the input data window
     # y values: actual future values to be predicted from data window
     train_x, train_y, test_x, test_y = [], [], [], []
 
-    for index, row in enumerate(train_indices):
-        if row in train_targets:
-            train_x.append([train[j, :] for j in range(index - time_steps, index)])
-            train_y.append([train[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
+    for i in range(train_len):
 
-    for index, row in enumerate(test_indices):
-        if row in test_targets:
-            test_x.append([test[j, :] for j in range(index - time_steps, index)])
-            test_y.append([test[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
+        if (i + time_steps) < train_len:
+            train_x.append([train[j, :] for j in range(i, i + time_steps)])
+            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+            
+    for i in range(test_len):
+        
+        if (i + time_steps) < test_len:
+            test_x.append([test[j, :] for j in range(i, i + time_steps)])
+            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+
 
     train_x = np.array(train_x)
     train_y = np.array(train_y)
     test_x = np.array(test_x)
     test_y = np.array(test_y)
 
-    shuffled_train_indices = list(range(train_x.shape[0]))
-    # random.seed(0)
-    random.shuffle(shuffled_train_indices)
-
-    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
-
-    return shuffled_train_x, shuffled_train_y, test_x, test_y
+    return train_x, train_y, test_x, test_y
 #data_processing END
 
 
@@ -1165,23 +1162,18 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices, final_window = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
-    train_x, train_y, test_x, test_y = make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps)
+    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col, time_steps)
+    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
 
-    final_window = final_window.to_numpy()
-    final_window = np.reshape(final_window, [1, final_window.shape[0], final_window.shape[1]])
-
-    return scaler, col_names, train_x, train_y, test_x, test_y, final_window
+    return scaler, col_names, train_x, train_y, test_x, test_y
 
 
 def main():
-    stock_ticker = 'TEL'
-    scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=None, time_steps=10, drop_col=['psei_returns'])
+    stock_ticker = 'ALI'
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(col_names)
-    print(train_y.shape)
-    print(test_y.shape)
     sys.exit()
 
     print(train_x.shape)
@@ -1191,9 +1183,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-    # with open('keys/EOD_API_key.txt') as file:
-    #     token = file.readline()
-    # trading_days = get_trading_dates('TEL', get_dates_five_years(), token).iloc[-1]
-
-    # print(type(trading_days))
