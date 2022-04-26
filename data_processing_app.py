@@ -6,7 +6,8 @@ from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
-import datetime, requests, json, math, shelve, sys, os, re, pathlib, random
+from pattern.en import lexeme
+import datetime, requests, json, math, shelve, sys, os, re, pathlib, random, nltk, shutil, zipfile
 
 #get_technical_data START
 def get_dates_five_years(testing=False):
@@ -260,7 +261,7 @@ def get_technical_data(stock_ticker, date_range):
     EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
 
     for indicator, period in EOD_indicators:
-        print(indicator, period)
+        #print(indicator, period)
         indicator_data = get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
         data = data.merge(indicator_data, on='date')
 
@@ -577,13 +578,33 @@ def get_fundamental_data(stock_ticker, date_range):
 #get_fundamental_data END
 
 #get_sentimental_data START
+def pattern_stopiteration_workaround():
+    try:
+        nltk.data.find('corpora/omw-1.4')
+    except LookupError:
+        nltk.download('omw-1.4')
+    
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+    
+    try:
+        nltk.data.find('taggers/averaged_perceptron_tagger')
+    except LookupError:
+        nltk.download('averaged_perceptron_tagger')
+
+    try:
+        lexeme('gave')
+    except:
+        pass
+
+
 def get_dates_between(start_date, end_date):
     """Returns a list of dates in yyyy-mm-dd format between two given dates.
-
     Args:
         start_date (str): The starting date.
         end_date (str): The ending date.
-
     Returns:
         list: A list of date strings.
     """
@@ -600,62 +621,89 @@ def get_dates_between(start_date, end_date):
     
     return date_list
 
+
 def clean_text(text):
     """Cleans an input text (sentence).
-
     Args:
         text (str): The text to be cleaned.
-
     Returns:
         string: The cleaned text.
     """
 
     # remove all non-letters (punctuations, numbers, etc.)
-    processed_text = re.sub("[^a-zA-z]", " ", text)
+    processed_text = re.sub("[^a-zA-Z]", " ", text)
     # remove single characters
-    processed_text = re.sub(r"\s+[a-zA-z]\s+", " ", processed_text)
+    processed_text = re.sub(r"\s+[a-zA-Z]\s+", " ", processed_text)
     # remove multiple whitespaces
+    processed_text = re.sub(r"\s+", " ", processed_text)
+
+    # clean more
+    processed_text = re.sub(r"\s+[a-zA-Z]\s+", " ", processed_text)
     processed_text = re.sub(r"\s+", " ", processed_text)
     
     return processed_text
 
+
 def text_to_int(vocab, texts, max_seq_length):
     """Converts a set of texts (sentences) into their numerical representations.
-
     Args:
         vocab (dict): A dictionary with words as keys and their integer equivalent as values.
         texts (list): The list of texts (sentences) to be converted.
         max_seq_length (int): The length of the longest sentence during model building.
-
     Returns:
         list: A list of lists wherein each element represents the numerical representation of a specific text (sentence).
     """
 
+    # verb tags (possible verb tenses/forms)
+    verb_tags = ["VB", "VBD", "VBG", "VBN", "VBP", "VBZ"]
+
     sequences = []
     for text in texts:
-        text_list = text.split()
-        sequence = []
-        for word in text_list:
-            # words not in the dictionary will have a value of 0
-            if word not in vocab:
-                sequence.append(0)
-            else:
-                sequence.append(vocab[word])
+        tokenized_text = nltk.word_tokenize(text)
+        tags = nltk.pos_tag(tokenized_text)
+        
+        verb_dict = dict()
+        for tag in tags:
+            if tag[1] in verb_tags:
+                # lexeme outputs a list of possible forms/tenses of given verb
+                # [base, present, progressive, past]
+                verb_dict[tag[0].lower()] = lexeme(tag[0].lower())
 
+        sequence = []
+        tokenized_clean_text = clean_text(text).lower().split()
+        for word in tokenized_clean_text:
+            if word in vocab:
+                sequence.append(vocab[word])
+            # words that are not verbs and not in the dictionary will have a value of 0
+            elif word not in verb_dict:
+                sequence.append(0)
+            # if current word is verb
+            else:
+                appended = 0
+                possible_forms = verb_dict[word]
+                for possible_form in possible_forms:
+                    if possible_form in vocab:
+                        sequence.append(vocab[possible_form])
+                        appended = 1
+                        break
+                
+                # set to 0 if all possible still not in vocab
+                if not appended:
+                    sequence.append(0)
+            
             # truncate sentences longer than max_seq_length
             if len(sequence) == max_seq_length:
                 break
-
+        
         sequences.append(sequence)
-    
+
     return sequences
+
 
 def load_json_to_dict(path_file_name):
     """Loads a json file to a dictionary.
-
     Args:
         path_file_name (str): The json file name or the path to it.
-
     Returns:
         dict: A dictionary that contains the json file contents.
     """
@@ -666,16 +714,17 @@ def load_json_to_dict(path_file_name):
 
     return data
 
+
 def get_news(stock_ticker, date_range, historical=False):
     """Gets news data from News API.
-
     Args:
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
         historical (bool, optional): If set to true, access historical news data. Defaults to False.
-
     Returns:
-        dict: A dictionary with dates as keys and the corresponding news headlines as values.
+        tuple: (list, dict)
+            list: A list containing raw (complete with extras) news data.
+            dict: A dictionary with dates as keys and the corresponding news data as values.
     """
 
     # related terms for each stock ticker (will be updated in the future to include all stocks in PSE)
@@ -701,62 +750,74 @@ def get_news(stock_ticker, date_range, historical=False):
 
         er = EventRegistry(apiKey=token, allowUseOfArchive=False)
     
+    start_date = datetime.datetime.strptime(date_range[0], '%Y-%m-%d')
+    start_date = (start_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+
     q = QueryArticlesIter(
-        keywords=QueryItems.OR(ticker_terms[stock_ticker]),
-        dateStart=date_range[0],
+        dateStart=start_date,
         dateEnd=date_range[1],
+        keywords=QueryItems.OR(ticker_terms[stock_ticker]), 
         sourceLocationUri=er.getLocationUri("Philippines"),
         keywordsLoc="body,title",
         ignoreKeywords=QueryItems.OR(["PBA", "basketball"]),
+        ignoreConceptUri=QueryItems.OR([er.getConceptUri("PBA"), er.getConceptUri("basketball"), er.getConceptUri("Sports")]),
         ignoreCategoryUri=er.getCategoryUri("Sports"),
         isDuplicateFilter="skipDuplicates",
         hasDuplicateFilter="skipHasDuplicates"
         )
 
+    raw_news = []
     news_dict = dict()
-    curr_date_news = []
-    count = 0
     for article in q.execQuery(er, sortBy="date", sortByAsc=True, maxItems=q.count(er)):
-        date = article["date"]
+        raw_news.append(article)
+
+        date = ""
         title = article["title"]
-        if count == 0:
-            curr_date = date
-            count += 1
-            curr_date_news.append(title)
+        body = article["body"]
+        curr_news = [title, body]
+        
+        if ("dateTimePub" in article) and (article["dateTimePub"] != None):
+            dateTime = article["dateTimePub"]
+            dateTime = re.sub("[a-zA-Z]", "", dateTime)
+            dateTime = datetime.datetime.strptime(dateTime, '%Y-%m-%d%H:%M:%S')
+            date = (dateTime + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
+        else:
+            dateTime = article["dateTime"]
+            dateTime = re.sub("[a-zA-Z]", "", dateTime)
+            dateTime = datetime.datetime.strptime(dateTime, '%Y-%m-%d%H:%M:%S')
+            date = (dateTime + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
+        
+        if (date < date_range[0]) or (date > date_range[1]):
             continue
-        if date == curr_date:
-            curr_date_news.append(title)
-            continue
-        news_dict[curr_date] = curr_date_news
-        curr_date_news = []
-        curr_date = date
-        curr_date_news.append(title)
 
-    news_dict[curr_date] = curr_date_news
+        if date in news_dict:
+            dict_val = news_dict[date]
+            dict_val.append(curr_news)
+            news_dict.update({date: dict_val})
+        else:
+            news_dict[date] = [curr_news]
 
-    return news_dict
+    return raw_news, news_dict
+
 
 def get_score(news, vocab, model, max_seq_length):
     """Computes for the average score of a set of news headlines.
-
     Args:
         news (list): A list of news headlines to be scored.
         vocab (dict): A dictionary with words as keys and their integer equivalent as values.
         model (keras.Sequential): The best performing sentiment model to be used for scoring.
         max_seq_length (int): The length of the longest sentence during model building.
-
     Returns:
         np.float32: The average score.
     """
 
-    # clean headlines
-    clean_headlines = []
+    temp = []
     for headline in news:
-        clean_headline = clean_text(headline)
-        clean_headlines.append(clean_headline.lower())
+        temp.append(headline[0])
+    news = temp
 
     # convert into their numerical representations    
-    sequences = text_to_int(vocab, clean_headlines, max_seq_length)
+    sequences = text_to_int(vocab, news, max_seq_length)
     sequences = tf.keras.preprocessing.sequence.pad_sequences(sequences, maxlen = max_seq_length, padding = "post")
     sequences = np.array(sequences)
 
@@ -769,16 +830,18 @@ def get_score(news, vocab, model, max_seq_length):
 
     return mean(scores)
 
+
 def get_sentimental_data (stock_ticker, date_range):
     """Computes and/or access sentimental data for a specific stock. To be used for model training.
-
     Args:
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
-
     Returns:
         pd.Dataframe: Dataframe representing the sentiment indicators.
     """
+
+    # ignore raised StopIteration
+    pattern_stopiteration_workaround()
 
     # get trading days
     with open('keys/EOD_API_key.txt') as file:
@@ -790,6 +853,12 @@ def get_sentimental_data (stock_ticker, date_range):
     # load vocab constructed during model building
     vocab = load_json_to_dict("sentiment data/vocab.json")
     # load the best performing model in terms of accuracy
+    if os.path.exists("best sentiment model"):
+        shutil.rmtree("best sentiment model")
+
+    with zipfile.ZipFile("best sentiment model.zip", "r") as zip_ref:
+        zip_ref.extractall()
+        
     model = tf.keras.models.load_model("best sentiment model")
 
     # prepare path/file name of scores file
@@ -809,11 +878,14 @@ def get_sentimental_data (stock_ticker, date_range):
             return pd.DataFrame({"date": dates, "sentiment": sentiments})
         # access additional news data through an API call up to 1 month old
         else:
-            latest_news = get_news(stock_ticker, (dates_list[-1], date_range[1]), historical=False)
+            more_news_data = get_news(stock_ticker, (dates_list[-1], date_range[1]), historical=False)
+            latest_news = more_news_data[1]
 
-            remaining_trading_days = trading_days[trading_days.index(dates_list[-1])+1:]
-            dates = dates_list[dates_list.index(trading_days[0]):]
-            sentiments = sentiments_list[dates_list.index(trading_days[0]):]
+            remaining_trading_days = trading_days[trading_days.index(dates_list[-1]):]
+            dates = dates_list
+            dates.pop()
+            sentiments = sentiments_list
+            sentiments.pop()
 
             # score additional news
             for i in range(len(remaining_trading_days)):
@@ -835,7 +907,14 @@ def get_sentimental_data (stock_ticker, date_range):
                         scores.append(get_score(latest_news[day], vocab, model, max_seq_length))
                 sentiments.append(mean(scores))
             
-            return pd.DataFrame({"date": dates, "sentiment": sentiments})
+            data = pd.DataFrame({"date": dates, "sentiment": sentiments})
+            
+            data.to_csv(scores_path, index=False)
+
+            dates_needed = dates[dates.index(trading_days[0]):]
+            sentiments_needed = sentiments[dates.index(trading_days[0]):]
+
+            return pd.DataFrame({"date": dates_needed, "sentiment": sentiments_needed})
     
     # for when a file containing sentiment scores for a given stock is not present (i.e., data for given stock is not yet in database)
     else: 
@@ -849,7 +928,9 @@ def get_sentimental_data (stock_ticker, date_range):
             sys.exit()
         
         # access historical news data through an API call
-        news = get_news(stock_ticker, (date_range[0], date_range[1]), historical=True)
+        news_data = get_news(stock_ticker, (date_range[0], date_range[1]), historical=True)
+        raw_news = news_data[0]
+        news = news_data[1]
         
         # make directory for the new stock
         path = "sentiment data/" + str(stock_ticker)
@@ -857,7 +938,12 @@ def get_sentimental_data (stock_ticker, date_range):
             os.mkdir(path)
 
         # save historical news data as json inside created directory
-        news_path = "sentiment data/" + str(stock_ticker) + "/monthly_updated_news.json"
+        raw_news_path = "sentiment data/" + str(stock_ticker) + "/raw_news.json"
+        file = open(raw_news_path, "w")
+        json.dump(raw_news, file)
+        file.close()
+
+        news_path = "sentiment data/" + str(stock_ticker) + "/news.json"
         file = open(news_path, "w")
         json.dump(news, file)
         file.close()
