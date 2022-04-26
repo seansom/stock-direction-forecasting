@@ -568,13 +568,13 @@ if __name__ == '__main__':
 
     # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
 
-    stock_ticker = 'ALI'
+    stock_ticker = 'AP'
 
     dropped_features = []
     time_steps = [1, 5, 10, 15, 20]
 
     for step in time_steps:
-        curr_dropped_features = backward_feature_selection(stock_ticker, step, repeats=15, hps=None)
+        curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
 
     hps_list = get_hps(stock_ticker, dropped_features)

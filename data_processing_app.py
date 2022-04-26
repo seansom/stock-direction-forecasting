@@ -9,6 +9,15 @@ from statistics import mean
 from pattern.en import lexeme
 import datetime, requests, json, math, shelve, sys, os, re, pathlib, random, nltk, shutil, zipfile
 
+
+def requests_get(url):
+    while True:
+        try:
+            return requests.get(url, timeout=10)
+        except requests.exceptions.Timeout:
+            print('Timeout. Restarting request...')
+            continue
+
 #get_technical_data START
 def get_dates_five_years(testing=False):
     """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
@@ -31,31 +40,16 @@ def get_dates_five_years(testing=False):
 
 
 def get_trading_dates(stock_ticker, date_range, token):
+    exchange = 'PSE'
+    url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
 
-    os.chdir('data')
+    response = requests.get(url)
+    data = response.json()
 
-    # open stock_database to see if data was already collected from API
-    # otherwise, get data from API and store it in database
-    stock_database = shelve.open('stock_database')
-    stock_database_key = f"{stock_ticker} trading dates {date_range}"
+    # convert to pd.dataframe
+    data = pd.json_normalize(data)
 
-    if stock_database_key in stock_database:
-        trading_dates = stock_database[stock_database_key]
-
-    else:
-        exchange = 'PSE'
-        url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
-
-        response = requests.get(url)
-        data = response.json()
-
-        # convert to pd.dataframe
-        trading_dates = (pd.json_normalize(data))['date']
-        stock_database[stock_database_key] = trading_dates
-
-    os.chdir('..')
-
-    return trading_dates
+    return data['date']
 
 
 def get_technical_indicators(data):
@@ -172,7 +166,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     
     url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
 
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -226,12 +220,12 @@ def get_technical_data(stock_ticker, date_range):
 
     # adjust and add days to first trading day to be able to compute indicators with periods
     first_trading_day_datetime = datetime.datetime.strptime(first_trading_day,'%Y-%m-%d')
-    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
+    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=40)).strftime('%Y-%m-%d')
 
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={last_trading_day}"
     
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -291,7 +285,7 @@ def get_fundamental_trading_dates(stock_ticker, date_range, token):
     exchange = 'PSE'
 
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -325,7 +319,7 @@ def get_psei_returns(date_range, token):
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
 
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}"
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -383,7 +377,7 @@ def get_fundamental_indicator_from_EOD(stock_ticker, token):
     exchange = 'PSE'
 
     url = f"https://eodhistoricaldata.com/api/fundamentals/{stock_ticker}.{exchange}?api_token={token}"
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     return data
@@ -407,9 +401,9 @@ def get_macro_indicator_from_EOD(token, date_range):
     infl_url = f"https://eodhistoricaldata.com/api/macro-indicator/{country_code}?api_token={token}&fmt=json&indicator=inflation_consumer_prices_annual"
     intrst_url = f"https://eodhistoricaldata.com/api/macro-indicator/{country_code}?api_token={token}&fmt=json&indicator=real_interest_rate"
     
-    gdp_data = requests.get(gdp_url).json()
-    infl_data = requests.get(infl_url).json()
-    intrst_data = requests.get(intrst_url).json()
+    gdp_data = requests_get(gdp_url).json()
+    infl_data = requests_get(infl_url).json()
+    intrst_data = requests_get(intrst_url).json()
 
     gdp_data = pd.json_normalize(gdp_data)
     infl_data = pd.json_normalize(infl_data)
@@ -1262,7 +1256,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
 
 def main():
     stock_ticker = 'TEL'
-    scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=None, time_steps=10, drop_col=['psei_returns'])
+    scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=10, drop_col=['psei_returns'])
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(col_names)

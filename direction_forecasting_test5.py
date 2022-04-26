@@ -277,84 +277,53 @@ def feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
     return dropped_features
 
 
-def forward_feature_selection(stock_ticker, time_steps, repeats=10, hps=None):
+def backward_feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
     
-    features = ['ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     num_features = len(features)
-    dropped_features = features.copy()
+    dropped_features = []
 
     print("===================================================")
     print("Starting Feature Selection...")
-    print(f"Round 0/{num_features}")
-    print(f"Features Tested: 0/{num_features} (current features: [])")
+    print(f"Features Tested: 0/{num_features} (current dropped: {dropped_features})")
+    
 
     model_perfs = []
-
     for _ in range(repeats):
-        curr_model_perf, _, _ = experiment(stock_ticker, time_steps, drop_col=dropped_features, test_on_val=True, hps=hps)
+        curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=None, test_on_val=True, hps=hps)
         model_perfs.append(curr_model_perf['da'])
 
     curr_best_da = mean(model_perfs)
     
     print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
-    print(f"Dropped Features: {dropped_features}")
+    print(f"Current Features: {features}")
     print("===================================================")
 
-    added_features = []
-    curr_mean_model_perfs = [0] * (len(features) + 1)
-    curr_mean_model_perfs[0] = curr_best_da
 
-    for test_round in range(num_features):
+    for index, feature in enumerate(features):
 
-        prev_round_best_da = curr_best_da
+        model_perfs = []
+        dropped_features.append(feature)
 
-        for index, feature in enumerate(features):
+        print(f"Features Tested: {index + 1}/{num_features} (current dropped: {dropped_features})")
 
-            if feature in added_features:
-                continue
+        for _ in range(repeats):
+            curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=dropped_features, test_on_val=True, hps=hps)
+            model_perfs.append(curr_model_perf['da'])
 
-            added_features.append(feature)
+        curr_da = mean(model_perfs)
 
-            print(f"Round {test_round + 1}/{num_features}")
-            print(f"Features Tested: {index + 1}/{num_features} (current features: {added_features})")
+        if curr_da > curr_best_da:
+            curr_best_da = curr_da
+        else:
+            dropped_features.remove(feature)
 
-            model_perfs = []
+        print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+        print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+        
+        print(f"Current Features: {[feature for feature in features if feature not in dropped_features]}")
+        print("===================================================")
 
-            dropped_features = features.copy()
-            for added_feature in added_features:
-                dropped_features.remove(added_feature)
-
-            for _ in range(repeats):
-                curr_model_perf, _, _ = experiment(stock_ticker, time_steps, drop_col=dropped_features, test_on_val=True, hps=hps)
-                model_perfs.append(curr_model_perf['da'])
-
-            curr_da = mean(model_perfs)
-            curr_mean_model_perfs[index + 1] = curr_da
-
-            if curr_da > curr_best_da:
-                curr_best_da = curr_da
-
-            added_features.remove(feature)
-
-            print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
-            print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
-            print("===================================================")
-
-        if curr_best_da <= prev_round_best_da:
-            break
-
-        curr_best_feature_index = curr_mean_model_perfs.index(curr_best_da) - 1
-        added_features.append(features[curr_best_feature_index])
-
-    dropped_features = features.copy()
-    for added_feature in added_features:
-        dropped_features.remove(added_feature)
-
-    print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
-    print(f"Added Features: {added_features}")
-    print(f"Dropped Features: {dropped_features}")
-    print("===================================================")
-    
     return dropped_features
 
 
@@ -525,13 +494,13 @@ if __name__ == '__main__':
     # visualize_returns('BPI')
 
 
-    stock_ticker = 'AP'
+    stock_ticker = 'MER'
 
     dropped_features = []
-    time_steps = [1, 10, 20]
+    time_steps = [1, 5, 10, 15, 20]
 
     for step in time_steps:
-        curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
+        curr_dropped_features = backward_feature_selection(stock_ticker, step, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
 
     print(dropped_features)
