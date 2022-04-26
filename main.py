@@ -1,3 +1,4 @@
+from turtle import update
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import keras_tuner as kt
@@ -24,6 +25,26 @@ class PredictionThread(QThread):
 
 
 
+class GettingThread(QThread):
+    def __init__(self, main_window):
+        QThread.__init__(self)
+        self.main_window = main_window
+        
+    def run(self):
+        self.main_window.get_model()
+
+
+
+class TuningThread(QThread):
+    def __init__(self, main_window):
+        QThread.__init__(self)
+        self.main_window = main_window
+        
+    def run(self):
+        self.main_window.tune_model()
+
+
+
 class MainWindow(qtw.QMainWindow):
     """The main window for the program.
 
@@ -42,6 +63,8 @@ class MainWindow(qtw.QMainWindow):
         self.setWindowTitle("Stock Direction Forecasting")
 
         self.ui.predict_button.clicked.connect(self.run_prediction_thread)
+        self.ui.get_model_button.clicked.connect(self.run_getting_thread)
+        self.ui.tune_model_button.clicked.connect(self.run_tuning_thread)
 
 
     def disable_ui(self):
@@ -52,6 +75,7 @@ class MainWindow(qtw.QMainWindow):
         self.ui.stock_ticker_line_edit3 .setEnabled(False)
         self.ui.tune_model_button.setEnabled(False)
 
+
     def enable_ui(self):
         self.ui.stock_ticker_line_edit1.setEnabled(True)
         self.ui.predict_button.setEnabled(True)
@@ -60,7 +84,7 @@ class MainWindow(qtw.QMainWindow):
         self.ui.stock_ticker_line_edit3 .setEnabled(True)
         self.ui.tune_model_button.setEnabled(True)
 
-    
+
     def get_hps(self, stock_ticker):
 
         os.chdir('data')
@@ -69,13 +93,14 @@ class MainWindow(qtw.QMainWindow):
         hps_database_key = f"{stock_ticker}"
 
         if hps_database_key in hps_database:
-            hps = hps_database[hps_database_key]['hps']
-            
+            hps = hps_database[hps_database_key]
         else:
             hps = None
 
         hps_database.close()
         os.chdir('..')
+
+        return hps
 
 
     def make_prediction(self):
@@ -87,6 +112,12 @@ class MainWindow(qtw.QMainWindow):
             stock_ticker = stock_ticker.strip().upper()
 
             self.ui.stock_ticker_line_edit1.clear()
+
+            if len(stock_ticker) == 0:
+                self.ui.status_label1.setText('[Error] Invalid stock ticker')
+                self.ui.status_label2.setText('[Error] Invalid stock ticker')
+                self.enable_ui()
+                return
 
             self.ui.status_label1.setText(f'Forecasting {stock_ticker} stock...')
             self.ui.status_label2.setText(f'Forecasting {stock_ticker} stock...')
@@ -102,7 +133,7 @@ class MainWindow(qtw.QMainWindow):
             print("===================================================")
             for i in range(repeats):
                 print(f"Experiment {i + 1} / {repeats}")
-                scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
+                scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=time_steps, drop_col=None)
                 perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps=hps, window=self)
                 performances.append(perf)
                 final_predictions.append(final_prediction)
@@ -173,8 +204,156 @@ class MainWindow(qtw.QMainWindow):
 
             print(f'Final Predictions: {final_predictions}')
 
-            self.ui.status_label1.setText('Idle')
-            self.ui.status_label2.setText('Idle')
+            self.ui.status_label1.setText('Idle - Done forecasting')
+            self.ui.status_label2.setText('Idle - Done forecasting')
+            self.enable_ui()
+
+        except json.decoder.JSONDecodeError:
+            os.chdir('..')
+            self.ui.status_label1.setText('[Error] Invalid stock ticker')
+            self.ui.status_label2.setText('[Error] Invalid stock ticker')
+            self.enable_ui()
+
+
+    def clear_model_info(self):
+        self.ui.last_tuning_date_label2.setText('-')
+        self.ui.layers_label.setText('-')
+        self.ui.units_label.setText('-')
+        self.ui.dropout_label.setText('-')
+        self.ui.window_size_label.setText('-')
+
+
+    def update_model_info(self, hps=None):
+        self.clear_model_info()
+        
+        if hps is None:
+            last_model_tuning_date = 'Never'
+            layers = 'No data'
+            units = 'No data'
+            dropout = 'No data'
+            time_steps = 'No data'
+
+        else:
+            last_model_tuning_date = hps['last_model_tuning_date']
+            layers = str(hps['layers'])
+            units = str(hps['units'])
+            dropout = str(hps['dropout'])
+            time_steps = str(hps['time_steps'])
+
+        self.ui.last_tuning_date_label2.setText(last_model_tuning_date)
+        self.ui.layers_label.setText(layers)
+        self.ui.units_label.setText(units)
+        self.ui.dropout_label.setText(dropout)
+        self.ui.window_size_label.setText(time_steps)
+
+
+    def get_model(self):
+
+        self.disable_ui()
+        self.clear_model_info()
+
+        try:
+            stock_ticker = self.ui.stock_ticker_line_edit2.text()
+            stock_ticker = stock_ticker.strip().upper()
+
+            self.ui.stock_ticker_line_edit2.clear()
+
+            if len(stock_ticker) == 0:
+                self.ui.status_label1.setText('[Error] Invalid stock ticker')
+                self.ui.status_label2.setText('[Error] Invalid stock ticker')
+                self.enable_ui()
+                return
+
+            self.ui.status_label1.setText(f'Getting model information for {stock_ticker} stock...')
+            self.ui.status_label2.setText(f'Getting model information for {stock_ticker} stock...')
+
+            hps = self.get_hps(stock_ticker)
+
+            # to ensure stock_ticker is valid (listed in PSE)
+            if hps is None:
+                get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
+
+            self.update_model_info(hps=hps)
+
+            self.ui.status_label1.setText(f'Idle - Model information for {stock_ticker} displayed')
+            self.ui.status_label2.setText(f'Idle - Model information for {stock_ticker} displayed')
+            self.enable_ui()
+
+        except json.decoder.JSONDecodeError:
+            os.chdir('..')
+            self.ui.status_label1.setText('[Error] Invalid stock ticker')
+            self.ui.status_label2.setText('[Error] Invalid stock ticker')
+            self.enable_ui()
+
+
+    def tune_model(self):
+        
+        self.disable_ui()
+        self.clear_model_info()
+
+        try:
+            stock_ticker = self.ui.stock_ticker_line_edit3.text()
+            stock_ticker = stock_ticker.strip().upper()
+
+            self.ui.stock_ticker_line_edit3.clear()
+
+            if len(stock_ticker) == 0:
+                self.ui.status_label1.setText('[Error] Invalid stock ticker')
+                self.ui.status_label2.setText('[Error] Invalid stock ticker')
+                self.enable_ui()
+                return
+
+            self.ui.status_label1.setText(f'Tuning model for {stock_ticker} stock...')
+            self.ui.status_label2.setText(f'Tuning model for {stock_ticker} stock...')
+            
+            date_range = get_dates_five_years()
+            hps = self.get_hps(stock_ticker)
+
+            if (hps is None) or (date_range[1] != hps['last_model_tuning_date']):
+                time_steps = 20
+                # to be commented out at a later version
+                #_, _, train_x, train_y, _, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=None)
+                #optimal_hps = get_optimal_hps(train_x, train_y)
+
+                os.chdir('data')
+
+                hps_database = shelve.open('hps_database')
+                hps_database_key = f"{stock_ticker}"
+
+                # to be commented out at a later version to replace placeholder
+                """
+                if hps_database_key in hps_database:
+                    hps_database.pop(hps_database_key)
+
+                last_model_tuning_date = date_range[1]
+                hps_database[hps_database_key] = {
+                    'last_model_tuning_date' : last_model_tuning_date,
+                    'layers' : optimal_hps['layers'],
+                    'units' : optimal_hps['units'],
+                    'dropout' : optimal_hps['dropout'],
+                    'time_steps' : time_steps
+                }
+                """
+                # start placeholder
+                optimal_hps = hps_database.pop(hps_database_key)
+                hps_database[hps_database_key] = {
+                    'last_model_tuning_date' : date_range[1],
+                    'layers' : optimal_hps['layers'],
+                    'units' : optimal_hps['units'],
+                    'dropout' : optimal_hps['dropout'],
+                    'time_steps' : time_steps
+                }
+                # end placeholder
+
+                hps = hps_database[hps_database_key]
+
+                hps_database.close()
+                os.chdir('..')
+
+            self.update_model_info(hps=hps)
+
+            self.ui.status_label1.setText(f'Idle - Done tuning model for {stock_ticker}')
+            self.ui.status_label2.setText(f'Idle - Done tuning model for {stock_ticker}')
             self.enable_ui()
 
         except json.decoder.JSONDecodeError:
@@ -188,15 +367,19 @@ class MainWindow(qtw.QMainWindow):
         self.worker = PredictionThread(self)
         self.worker.start()
 
+    
+    def run_getting_thread(self):
+        self.worker = GettingThread(self)
+        self.worker.start()
 
     
+    def run_tuning_thread(self):
+        self.worker = TuningThread(self)
+        self.worker.start()
 
 
         
         
-
-
-
 
 
 
