@@ -1046,10 +1046,10 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y, random_state=0)
     mutual_infos = [round(abs(i), 6) for i in mutual_infos]
 
-    print(data)
-    print(list(data))
-    print(mutual_infos)
-    sys.exit()
+    # print(data)
+    # print(list(data))
+    # print(mutual_infos)
+    # sys.exit()
 
     # col_names = list(train)
     # print([(col_names[i], mutual_infos[i]) for i in range(len(col_names))])
@@ -1165,6 +1165,7 @@ def main():
     stock_ticker = 'ALI'
     scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
 
+    print(len(train_x) / (len(train_x) + len(test_x)))
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(col_names)
     sys.exit()

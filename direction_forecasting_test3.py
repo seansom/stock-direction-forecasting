@@ -193,7 +193,7 @@ def experiment(stock_ticker, time_steps, drop_col=None, test_on_val=False, hps=N
         dict: A dictionary of the performance metrics of the created model.
     """
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=drop_col)
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
 
     if test_on_val:
         test_len = train_x.shape[0] * 25 // 100
@@ -364,7 +364,7 @@ def get_hps(stock_ticker, dropped_features=None):
     hps_list = []
 
     for index, time_steps in enumerate(time_steps_list):
-        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=dropped_features[index])
+        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
         hps = get_optimal_hps(train_x, train_y)
         hps_list.append(hps)
 

@@ -34,6 +34,7 @@ def make_lstm_hypermodel(hp, time_steps, features):
     # create lstm hypermodel
     for _ in range(layers):
         lstm_hypermodel.add((keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout)))
+    # lstm_hypermodel.add(keras.layers.Dense(units=units / 4, activation="linear"))
     lstm_hypermodel.add(keras.layers.Dense(units=1, activation="linear"))
 
     lstm_hypermodel.compile(loss='mean_squared_error', optimizer='adam')
@@ -83,11 +84,13 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
 
     for _ in range(layers):
         lstm_model.add((keras.layers.LSTM(units=units, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout)))
+    # lstm_model.add(keras.layers.Dense(units=units / 4, activation="linear"))
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
 
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
+    
     lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.0526,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
@@ -497,10 +500,10 @@ if __name__ == '__main__':
     stock_ticker = 'MER'
 
     dropped_features = []
-    time_steps = [1, 5, 10, 15, 20]
+    time_steps = [1, 10, 20]
 
     for step in time_steps:
-        curr_dropped_features = backward_feature_selection(stock_ticker, step, repeats=15, hps=None)
+        curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
 
     print(dropped_features)

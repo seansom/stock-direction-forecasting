@@ -181,7 +181,10 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
     
-    url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    if indicator != 'macd':
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    else:
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
 
     response = requests_get(url)
     data = response.json()
@@ -922,7 +925,7 @@ def scale_data(data):
     return data
 
 
-def train_test_split(data):
+def train_test_split(data, time_steps):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -933,7 +936,7 @@ def train_test_split(data):
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
     test_len = len(data) * 2 // 10
-    train, test = data[:-test_len], data[-test_len:]
+    train, test = data[:-test_len], data[-test_len - time_steps:]
     return train, test
 
 
@@ -1002,7 +1005,7 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None):
+def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None, time_steps=1):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1155,7 +1158,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col)
+    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col, time_steps)
     train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
 
     return scaler, col_names, train_x, train_y, test_x, test_y
