@@ -1,3 +1,4 @@
+from tkinter.messagebox import NO
 from turtle import update
 from tensorflow import keras, compat
 from statistics import mean, stdev
@@ -94,6 +95,7 @@ class MainWindow(qtw.QMainWindow):
 
         if hps_database_key in hps_database:
             hps = hps_database[hps_database_key]
+
         else:
             hps = None
 
@@ -119,9 +121,8 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
-            self.ui.status_label1.setText(f'Forecasting {stock_ticker} stock...')
-            self.ui.status_label2.setText(f'Forecasting {stock_ticker} stock...')
-
+            self.ui.status_label1.setText('Please check console for possible confirmation')
+            self.ui.status_label2.setText('Please check console for possible confirmation')
 
             repeats = 5
             performances = []
@@ -133,10 +134,23 @@ class MainWindow(qtw.QMainWindow):
             print("===================================================")
             for i in range(repeats):
                 print(f"Experiment {i + 1} / {repeats}")
+                
                 scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=time_steps, drop_col=None)
+                
+                # for when user did not continue with News API historical call, will instead input new stock ticker
+                if scaler is None and col_names is None:
+                    self.ui.status_label1.setText('Idle - Please input new stock ticker')
+                    self.ui.status_label2.setText('Idle - Please input new stock ticker')
+                    self.enable_ui()
+                    return
+
+                self.ui.status_label1.setText(f'Forecasting {stock_ticker} stock...')
+                self.ui.status_label2.setText(f'Forecasting {stock_ticker} stock...')
+                
                 perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps=hps, window=self)
                 performances.append(perf)
                 final_predictions.append(final_prediction)
+                
                 print("===================================================")
                 self.ui.models_progress_label.setText(f'{i + 1} / {repeats}')
 
@@ -186,7 +200,7 @@ class MainWindow(qtw.QMainWindow):
 
             print()
 
-            # Print average accuracies of the built models
+            # print average accuracies of the built models
             print(f"Mean DA: {mean_da}")
             print(f"Mean UDA: {mean_uda}")
             print(f"Mean DDA: {mean_dda}")
@@ -209,7 +223,6 @@ class MainWindow(qtw.QMainWindow):
             self.enable_ui()
 
         except json.decoder.JSONDecodeError:
-            os.chdir('..')
             self.ui.status_label1.setText('[Error] Invalid stock ticker')
             self.ui.status_label2.setText('[Error] Invalid stock ticker')
             self.enable_ui()
@@ -271,7 +284,10 @@ class MainWindow(qtw.QMainWindow):
 
             # to ensure stock_ticker is valid (listed in PSE)
             if hps is None:
-                get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
+                with open('keys/EOD_API_key.txt') as file:
+                    token = file.readline()
+                
+                get_trading_dates(stock_ticker, get_dates_five_years(testing=True), token)
 
             self.update_model_info(hps=hps)
 
@@ -280,7 +296,6 @@ class MainWindow(qtw.QMainWindow):
             self.enable_ui()
 
         except json.decoder.JSONDecodeError:
-            os.chdir('..')
             self.ui.status_label1.setText('[Error] Invalid stock ticker')
             self.ui.status_label2.setText('[Error] Invalid stock ticker')
             self.enable_ui()
@@ -303,25 +318,33 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
-            self.ui.status_label1.setText(f'Tuning model for {stock_ticker} stock...')
-            self.ui.status_label2.setText(f'Tuning model for {stock_ticker} stock...')
+            self.ui.status_label1.setText('Please check console for possible confirmation')
+            self.ui.status_label2.setText('Please check console for possible confirmation')
             
             date_range = get_dates_five_years()
             hps = self.get_hps(stock_ticker)
 
             if (hps is None) or (date_range[1] != hps['last_model_tuning_date']):
                 time_steps = 20
-                # to be commented out at a later version
-                #_, _, train_x, train_y, _, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=None)
-                #optimal_hps = get_optimal_hps(train_x, train_y)
+                _, _, train_x, train_y, _, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=None)
+                
+                # for when user did not continue with News API historical call, will instead input new stock ticker
+                if train_x is None and train_y is None:
+                    self.ui.status_label1.setText('Idle - Please input new stock ticker')
+                    self.ui.status_label2.setText('Idle - Please input new stock ticker')
+                    self.enable_ui()
+                    return
+
+                self.ui.status_label1.setText(f'Tuning model for {stock_ticker} stock...')
+                self.ui.status_label2.setText(f'Tuning model for {stock_ticker} stock...')
+                
+                optimal_hps = get_optimal_hps(train_x, train_y)
 
                 os.chdir('data')
 
                 hps_database = shelve.open('hps_database')
                 hps_database_key = f"{stock_ticker}"
 
-                # to be commented out at a later version to replace placeholder
-                """
                 if hps_database_key in hps_database:
                     hps_database.pop(hps_database_key)
 
@@ -333,17 +356,6 @@ class MainWindow(qtw.QMainWindow):
                     'dropout' : optimal_hps['dropout'],
                     'time_steps' : time_steps
                 }
-                """
-                # start placeholder
-                optimal_hps = hps_database.pop(hps_database_key)
-                hps_database[hps_database_key] = {
-                    'last_model_tuning_date' : date_range[1],
-                    'layers' : optimal_hps['layers'],
-                    'units' : optimal_hps['units'],
-                    'dropout' : optimal_hps['dropout'],
-                    'time_steps' : time_steps
-                }
-                # end placeholder
 
                 hps = hps_database[hps_database_key]
 
@@ -357,7 +369,6 @@ class MainWindow(qtw.QMainWindow):
             self.enable_ui()
 
         except json.decoder.JSONDecodeError:
-            os.chdir('..')
             self.ui.status_label1.setText('[Error] Invalid stock ticker')
             self.ui.status_label2.setText('[Error] Invalid stock ticker')
             self.enable_ui()

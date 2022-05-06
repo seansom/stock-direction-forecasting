@@ -913,13 +913,13 @@ def get_sentimental_data (stock_ticker, date_range):
     # for when a file containing sentiment scores for a given stock is not present (i.e., data for given stock is not yet in database)
     else: 
         # "guard" against unintentional call of paid News API 
-        message = "Historical news data for " + str(stock_ticker) + " not in database, continue with API call? ('Y' if yes, 'N' exits current execution): "
+        message = "Historical news data for " + str(stock_ticker) + " not in database, continue with API call? ('Y' if yes, 'N' to input new stock ticker): "
         reply = input(message)
         while (reply != "Y" and reply != "N"):
             reply = input(message)
         if reply == "N":
-            print("Exiting ...")
-            sys.exit()
+            print("Please input new stock ticker in app")
+            return None
         
         # access historical news data through an API call
         news_data = get_news(stock_ticker, (date_range[0], date_range[1]), historical=True)
@@ -1210,6 +1210,17 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     if date_range == None:
         date_range = get_dates_five_years(testing=True)
 
+    # get sentimental data
+    # has its own database (sentiment data folder) and is handled within the function itself
+    sentimental_data = get_sentimental_data(stock_ticker, date_range)
+
+    if os.path.exists("best sentiment model"):
+        shutil.rmtree("best sentiment model")
+
+    # for when user did not continue with News API historical call, will instead input new stock ticker
+    if sentimental_data is None:
+        return None, None, None, None, None, None, None
+
     os.chdir('data')
 
     # reset database if it gets too large (current max size = 20 MB)
@@ -1240,10 +1251,6 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
         
     stock_database.close()
     os.chdir('..')
-
-    # get sentimental data
-    # has its own database (sentiment data folder) and is handled within the function itself
-    sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
     scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices, final_window = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
     train_x, train_y, test_x, test_y = make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps)
