@@ -935,7 +935,7 @@ def train_test_split(data, time_steps):
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
-    test_len = len(data) * 2 // 10
+    test_len = len(data) * 5 // 100
     train, test = data[:-test_len], data[-test_len - time_steps:]
     return train, test
 

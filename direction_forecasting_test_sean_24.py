@@ -4,7 +4,7 @@ from statistics import mean, stdev
 import keras_tuner as kt
 import numpy as np
 import pandas as pd
-import os, sys, math, copy, random
+import os, sys, math, copy, random, shutil
 from sklearn.preprocessing import PowerTransformer
 from data_processing_test_sean_8 import get_dataset, inverse_transform_data
 
@@ -343,16 +343,16 @@ def simple_feature_selection(stock_ticker, time_steps, train_size, test_size, re
     
     model_perfs = []
 
-    # for index in range(len(data)):
-    #     data[index]['test_x'] = data[index]['train_x'][-test_size:]
-    #     data[index]['test_y'] = data[index]['train_y'][-test_size:]
-    #     data[index]['train_x'] = data[index]['train_x'][:-test_size]
-    #     data[index]['train_y'] = data[index]['train_y'][:-test_size]
-
-    validation_size = data[0]['train_x'].shape[0] * 10 // 100
     for index in range(len(data)):
-        data[index]['test_x'] = data[index]['train_x'][-validation_size:]
-        data[index]['test_y'] = data[index]['train_y'][-validation_size:]
+        data[index]['test_x'] = data[index]['train_x'][-test_size:]
+        data[index]['test_y'] = data[index]['train_y'][-test_size:]
+        data[index]['train_x'] = data[index]['train_x'][:-test_size]
+        data[index]['train_y'] = data[index]['train_y'][:-test_size]
+
+    # validation_size = data[0]['train_x'].shape[0] * 10 // 100
+    # for index in range(len(data)):
+    #     data[index]['test_x'] = data[index]['train_x'][-validation_size:]
+    #     data[index]['test_y'] = data[index]['train_y'][-validation_size:]
 
     for i in range(repeats):
         print(f"Experiment {i + 1}/{repeats}")
@@ -493,26 +493,33 @@ def batch_test():
 
     stock_ticker = 'ALI'
     train_size = 1004
-    test_size = 42
+    test_size = 21
     repeats = 12
 
-    time_steps_list = [5] #[1, 5, 10, 15, 20]
+    time_steps_list = [1] #[1, 5, 10, 15, 20]
 
     dropped_features_list = []
     hps_list = []
 
     for time_steps in time_steps_list:
+        break
         dropped_features_list.append(simple_feature_selection(stock_ticker, time_steps, train_size, test_size, repeats))
+
+    dropped_features_list = [['inflation', 'real_interest_rate', 'gdp', 'p/e', 'slope2', 'sentiment', 'macd26', 'cmf5', 'intraday_return', 'uband', 'wr14', 'atr5', 'atr14', 'rsi5', 'k_values_x', 'k_values_y', 'ad', 'mband', 'eps', 'd_values_y', 'd_values_x', 'divergence', 'rsi14', 
+    'cci20', 'slope14', 'wr5', 'signal', 'cmf20', 'cci5', 'adx5', 'adx14']]
+
 
     print(dropped_features_list)
 
     for i in range(len(time_steps_list)):
+        break
         data = get_dataset(stock_ticker, date_range=None, time_steps=time_steps_list[i], train_size=train_size, test_size=test_size, drop_col=dropped_features_list[i])
         hps_list.append(get_optimal_hps(data[0]['train_x'], data[0]['train_y']))
 
     print(dropped_features_list)
     print(hps_list)
 
+    hps_list = [{'units': 32, 'layers': 1, 'dropout': 0.30000000000000004, 'tuner/epochs': 4, 'tuner/initial_epoch': 0, 'tuner/bracket': 3, 'tuner/round': 0}]
 
     for i in range(len(time_steps_list)):
 
@@ -521,8 +528,8 @@ def batch_test():
         print("===================================================")
         performances = []
 
-        for i in range(repeats):
-            print(f"Experiment {i + 1} / {repeats}")
+        for j in range(repeats):
+            print(f"Experiment {j + 1} / {repeats}")
             perf, _, _ = experiment(data, hps=hps_list[i])
             performances.append(perf)
             print_model_performance(perf)

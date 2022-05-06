@@ -1,27 +1,15 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-import datetime, requests, json, math, shelve, sys, os, re, pathlib
-from sklearn.feature_selection import mutual_info_classif, r_regression, mutual_info_regression
-
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
-
-def requests_get(url):
-
-    while True:
-        try:
-            return requests.get(url, timeout=10)
-        except requests.exceptions.Timeout:
-            print('Timeout. Restarting request...')
-            continue
-
+import datetime, requests, json, math, shelve, sys, os, re, pathlib, random
 
 #get_technical_data START
-def get_dates_five_years(testing=False):
+def get_dates_five_years(analysis=False):
     """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
 
     Args:
@@ -31,8 +19,8 @@ def get_dates_five_years(testing=False):
         tuple: (from_date, to_date)
     """
 
-    if testing:
-        return ('2017-02-13', '2022-02-11')
+    if analysis:
+        return ('2017-02-13', '2022-03-01')
 
     # generate datetime objects
     date_today = datetime.datetime.now()
@@ -57,7 +45,7 @@ def get_trading_dates(stock_ticker, date_range, token):
         exchange = 'PSE'
         url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
 
-        response = requests_get(url)
+        response = requests.get(url)
         data = response.json()
 
         # convert to pd.dataframe
@@ -89,9 +77,18 @@ def get_technical_indicators(data):
 
     # compute log stock returns
     stock_returns = [np.NaN]
+    grnd_truth1 = [np.NaN]
+    grnd_truth2 = []
     for i in range(1, data_len):
         stock_return = math.log(Decimal(close[i]) / Decimal(close[i - 1]))
         stock_returns.append(stock_return)
+        if stock_return >= 0:
+            grnd_truth1.append(1)
+            grnd_truth2.append(1)
+        else:
+            grnd_truth1.append(0)
+            grnd_truth2.append(0)
+    grnd_truth2.append(2)
 
     # compute A/D indicator values
     ad = []
@@ -108,7 +105,7 @@ def get_technical_indicators(data):
         ad.append(curr_ad)
 
     # compute William's %R indicator values
-    wr_period = 5
+    wr_period = 14
     wr = [np.NaN] * (wr_period - 1)
 
     for i in range(wr_period, data_len + 1):
@@ -123,7 +120,7 @@ def get_technical_indicators(data):
         wr.append(curr_wr)
 
     # compute Chaulkin Money Flow indicator
-    cmf_period = 5
+    cmf_period = 20
 
     mfv = []
     cmf = [np.NaN] * (cmf_period - 1)
@@ -151,7 +148,9 @@ def get_technical_indicators(data):
         'log_return': stock_returns,
         'ad' : ad,
         'wr' : wr,
-        'cmf' : cmf
+        'cmf' : cmf,
+        'ground truth 1': grnd_truth1,
+        'ground truth 2': grnd_truth2
     })
 
     return technical_indicators
@@ -181,12 +180,9 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
     
-    if indicator != 'macd':
-        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
-    else:
-        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
+    url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
 
-    response = requests_get(url)
+    response = requests.get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -214,7 +210,6 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     if data['date'][0] != date_range[0]:
         raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
 
-
     return data
 
 
@@ -241,12 +236,12 @@ def get_technical_data(stock_ticker, date_range):
 
     # adjust and add days to first trading day to be able to compute indicators with periods
     first_trading_day_datetime = datetime.datetime.strptime(first_trading_day,'%Y-%m-%d')
-    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=40)).strftime('%Y-%m-%d')
+    adjusted_first_day = (first_trading_day_datetime - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
 
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={last_trading_day}"
-
-    response = requests_get(url)
+    
+    response = requests.get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -273,12 +268,10 @@ def get_technical_data(stock_ticker, date_range):
     data = data.reset_index(drop=True)
 
     # get available technical indicators from API. format: (indicator, period)
-    EOD_indicators = [('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('slope', 5), ('stochastic', 5), ('macd', 5)]
-    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
-    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
+    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
 
     for indicator, period in EOD_indicators:
-        # print(indicator, period)
+        print(indicator, period)
         indicator_data = get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
         data = data.merge(indicator_data, on='date')
 
@@ -308,7 +301,7 @@ def get_fundamental_trading_dates(stock_ticker, date_range, token):
     exchange = 'PSE'
 
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
-    response = requests_get(url)
+    response = requests.get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -342,7 +335,7 @@ def get_psei_returns(date_range, token):
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
 
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}"
-    response = requests_get(url)
+    response = requests.get(url)
     data = response.json()
 
     # convert to pd.dataframe
@@ -400,7 +393,7 @@ def get_fundamental_indicator_from_EOD(stock_ticker, token):
     exchange = 'PSE'
 
     url = f"https://eodhistoricaldata.com/api/fundamentals/{stock_ticker}.{exchange}?api_token={token}"
-    response = requests_get(url)
+    response = requests.get(url)
     data = response.json()
 
     return data
@@ -424,9 +417,9 @@ def get_macro_indicator_from_EOD(token, date_range):
     infl_url = f"https://eodhistoricaldata.com/api/macro-indicator/{country_code}?api_token={token}&fmt=json&indicator=inflation_consumer_prices_annual"
     intrst_url = f"https://eodhistoricaldata.com/api/macro-indicator/{country_code}?api_token={token}&fmt=json&indicator=real_interest_rate"
     
-    gdp_data = requests_get(gdp_url).json()
-    infl_data = requests_get(infl_url).json()
-    intrst_data = requests_get(intrst_url).json()
+    gdp_data = requests.get(gdp_url).json()
+    infl_data = requests.get(infl_url).json()
+    intrst_data = requests.get(intrst_url).json()
 
     gdp_data = pd.json_normalize(gdp_data)
     infl_data = pd.json_normalize(infl_data)
@@ -908,10 +901,8 @@ def get_sentimental_data (stock_ticker, date_range):
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
-    
     Args:
         data (pd.DataFrame): The entire dataset.
-
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """	
@@ -935,12 +926,43 @@ def train_test_split(data, time_steps):
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
-    test_len = len(data) * 2 // 10
-    train, test = data[:-test_len], data[-test_len - time_steps:]
-    return train, test
+    
+    data_len = len(data)
+
+    final_window = data.tail(time_steps)
+    
+    target_indices = list(range(time_steps, data_len))
+    test_len = len(target_indices) * 2 // 10
+
+    # random.seed(0)
+    random.shuffle(target_indices)
+
+    train_targets = sorted(target_indices[:-test_len])
+    test_targets = sorted(target_indices[-test_len:])
+
+    train_indices = []
+    test_indices = []
+
+    for i in range(len(train_targets)):
+        for j in range(train_targets[i] - time_steps, train_targets[i] + 1):
+            if j not in train_indices:
+                train_indices.append(j)
+    
+    for i in range(len(test_targets)):
+        for j in range(test_targets[i] - time_steps, test_targets[i] + 1):
+            if j not in test_indices:
+                test_indices.append(j)
+
+    train_indices = sorted(train_indices)
+    test_indices = sorted(test_indices)
+
+    train_set = data.loc[train_indices]
+    test_set = data.loc[test_indices]
+
+    return train_set, test_set, train_targets, test_targets, train_indices, test_indices, final_window
 
 
-def transform_data(train, test):
+def transform_data(train, test, final_window):
     """Applies Yeo-Johnson transformation to train and test datasets. 
     Each column or feature in the dataset is standardized separately.
 
@@ -961,6 +983,7 @@ def transform_data(train, test):
     # Apply Yeo-Johnson Transform
     train = scaler.fit_transform(train)
     test = scaler.transform(test)
+    final_window = scaler.transform(final_window)
 
     # scale down outliers in train and test data
     for row in range(train.shape[0]):
@@ -977,11 +1000,19 @@ def transform_data(train, test):
             elif test[row, col] < -4.5:
                 test[row, col] = -4.5
 
+    for row in range(final_window.shape[0]):
+        for col in range(col_num):
+            if final_window[row, col] > 4.5:
+                final_window[row, col] = 4.5
+            elif final_window[row, col] < -4.5:
+                final_window[row, col] = -4.5
+
     # reconvert to dataframes
     train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
     test = pd.DataFrame({col: test[:, i] for i, col in enumerate(col_names)})
+    final_window = pd.DataFrame({col: final_window[:, i] for i, col in enumerate(col_names)})
 
-    return scaler, train, test, col_names
+    return scaler, train, test, final_window, col_names
 
 
 def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
@@ -1004,8 +1035,63 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
 
     return unscaled_data[feature].values
 
+def make_batch_dataset(data, analysis_dates, batch_size):
+    if len(data)-len(analysis_dates) < batch_size:
+        raise Exception(f'Can not make batch data sets; batch size is too large.')
 
-def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None, time_steps=1):
+    batch_dataset = []
+    for item in analysis_dates:
+        index = data[data['date'] == item].index.values.astype(int)[0]
+        batch = data.iloc[index-batch_size:index+1]
+        batch.reset_index(drop=True, inplace=True)
+        dict = {
+            'date': item,
+            'data': batch
+        }
+        batch_dataset.append(dict)
+    
+    return batch_dataset
+
+
+def batch_processing(batch_dataset, drop_col, time_steps):
+    for item in batch_dataset:
+        data = item['data']
+        del item['data']
+        #remove date column
+        data = data.drop(columns=['date', 'ground truth 1', 'ground truth 2'])
+
+        if drop_col is not None:
+            data.drop(columns=drop_col, inplace=True)
+
+        # raise exception if missing/null value is found in the combined dataset
+        if data.isnull().values.any():
+            raise Exception(f'Null value found in combined dataset.')
+
+        #scale data
+        scaled_data = scale_data(data)
+
+        #split data into train and test
+        train, test, train_targets, test_targets, train_indices, test_indices, final_window = train_test_split(scaled_data, time_steps)
+        
+        #apply Yeo-Johnson Power Transfrom
+        scaler, train, test, final_window, col_names = transform_data(train, test, final_window)
+
+        train_x, train_y, test_x, test_y = make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps)
+
+        final_window = final_window.to_numpy()
+        final_window = np.reshape(final_window, [1, final_window.shape[0], final_window.shape[1]])
+
+        item['scaler'] = scaler
+        item['train_x'] = train_x
+        item['train_y'] = train_y
+        item['test_x'] = test_x
+        item['test_y'] = test_y
+        item['final_window'] = final_window
+    
+    return batch_dataset, col_names
+
+
+def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col, analysis_range, batch_size):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1020,51 +1106,39 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
         test, pd.DataFrame: The processed test dataset.
         col_names, list: List of column names in the train and test datasets
     """	
+    start_analysis_date = datetime.datetime.strptime(analysis_range[0],'%Y-%m-%d') 
+    end_analysis_date = datetime.datetime.strptime(analysis_range[1],'%Y-%m-%d')
+
     data = technical_data.join(fundamental_data.set_index('date'), on='date')
     data = data.join(sentimental_data.set_index('date'), on='date')
     data.dropna(inplace=True)
     data.reset_index(drop=True, inplace=True)
 
-    #remove date column
-    data.drop(columns='date', inplace=True)
-
-    if drop_col is not None:
-        data.drop(columns=drop_col, inplace=True)
-
-    # raise exception if missing/null value is found in the combined dataset
-    if data.isnull().values.any():
-        raise Exception(f'Null value found in combined dataset.')
+    grnd_truth = data[['date', 'ground truth 1', 'ground truth 2']]
     
-    #scale data
-    scaled_data = scale_data(data)
 
-    #split data into train and test
-    train, test = train_test_split(scaled_data, time_steps)
+    analysis_dates = []
 
-    stock_returns_index = train.columns.get_loc("log_return")
+    unwanted_dates = []
 
-    feature_selection_train_x = train.to_numpy()[:-1]
-    feature_selection_train_y = train.to_numpy()[1:, stock_returns_index]
-
-    mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y, random_state=0)
-    mutual_infos = [round(abs(i), 6) for i in mutual_infos]
-
-    # print(data)
-    # print(list(data))
-    # print(mutual_infos)
-    # sys.exit()
-
-    # col_names = list(train)
-    # print([(col_names[i], mutual_infos[i]) for i in range(len(col_names))])
-    # sys.exit()
+    for i in grnd_truth.index:
+        if  start_analysis_date <= datetime.datetime.strptime(grnd_truth['date'][i], '%Y-%m-%d') <= end_analysis_date:
+            analysis_dates.append(grnd_truth['date'][i])
+        else:
+            unwanted_dates.append(i)
     
-    #apply Yeo-Johnson Power Transfrom
-    scaler, train, test, col_names = transform_data(train, test)
+    grnd_truth = grnd_truth.drop(unwanted_dates)
 
-    return scaler, train, test, col_names
+    grnd_truth.reset_index(drop=True, inplace=True)
+    
+    
+    batch_dataset = make_batch_dataset(data, analysis_dates, batch_size)
+    batch_dataset, col_names = batch_processing(batch_dataset, drop_col, time_steps)
+
+    return batch_dataset, col_names, grnd_truth
 
 
-def make_data_window(train, test, time_steps=1):
+def make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps=1):
     """Creates data windows for the train and test datasets.
     Splits train and test datasets into train_x, train_y, test_x,
     and test_y datasets. The _x datasets represent model input datasets
@@ -1090,38 +1164,49 @@ def make_data_window(train, test, time_steps=1):
     train = train.to_numpy()
     test = test.to_numpy()
 
-    train_len = train.shape[0]
-    test_len = test.shape[0]
-
     # x values: the input data window
     # y values: actual future values to be predicted from data window
     train_x, train_y, test_x, test_y = [], [], [], []
 
-    for i in range(train_len):
+    for index, row in enumerate(train_indices):
+        if row in train_targets:
+            train_x.append([train[j, :] for j in range(index - time_steps, index)])
+            train_y.append([train[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
 
-        if (i + time_steps) < train_len:
-            train_x.append([train[j, :] for j in range(i, i + time_steps)])
-            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
-            
-    for i in range(test_len):
-        
-        if (i + time_steps) < test_len:
-            test_x.append([test[j, :] for j in range(i, i + time_steps)])
-            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
-
+    for index, row in enumerate(test_indices):
+        if row in test_targets:
+            test_x.append([test[j, :] for j in range(index - time_steps, index)])
+            test_y.append([test[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
 
     train_x = np.array(train_x)
     train_y = np.array(train_y)
     test_x = np.array(test_x)
     test_y = np.array(test_y)
 
-    return train_x, train_y, test_x, test_y
+    shuffled_train_indices = list(range(train_x.shape[0]))
+    # random.seed(0)
+    random.shuffle(shuffled_train_indices)
+
+    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+
+    return shuffled_train_x, shuffled_train_y, test_x, test_y
 #data_processing END
 
 
-def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
-    if date_range == None:
-        date_range = get_dates_five_years(testing=True)
+def get_dataset(stock_ticker, date_range=('2017-02-13', '2022-03-01'), time_steps=20, drop_col=None, analysis_range=('2022-02-13', '2022-02-28'), batch_size = 1200):
+    '''analysis_range must be a subset of date_range.
+    The last date of analysis_range must at least be one day before the last day date_range
+    '''
+
+    if datetime.datetime.strptime(date_range[0],'%Y-%m-%d') > datetime.datetime.strptime(analysis_range[0],'%Y-%m-%d') or datetime.datetime.strptime(date_range[1],'%Y-%m-%d') < datetime.datetime.strptime(analysis_range[1],'%Y-%m-%d'):
+        raise Exception(f'Analysis_range must be a subset of date_range.')
+
+    if datetime.datetime.strptime(date_range[1],'%Y-%m-%d') <= datetime.datetime.strptime(analysis_range[1],'%Y-%m-%d'):
+        raise Exception(f'The last date of analysis_range must at least be one day before the last day date_range.')
+
+    #if date_range == None:
+    #    date_range = get_dates_five_years(analysis=True)
 
     os.chdir('data')
 
@@ -1158,24 +1243,47 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col, time_steps)
-    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
+    batch_dataset, col_names, grnd_truth = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, None, analysis_range, batch_size)
+    #scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices, final_window, grnd_truth = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
+    #train_x, train_y, test_x, test_y = make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps)
 
-    return scaler, col_names, train_x, train_y, test_x, test_y
+    #final_window = final_window.to_numpy()
+    #final_window = np.reshape(final_window, [1, final_window.shape[0], final_window.shape[1]])
+
+    return batch_dataset, col_names, grnd_truth
 
 
 def main():
-    stock_ticker = 'AP'
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
+    stock_ticker = 'ALI'
+    #scaler, col_names, train_x, train_y, test_x, test_y, final_window, grnd_truth = get_dataset(stock_ticker, date_range=None, time_steps=1)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    print(col_names)
+    
+    batch_dataset, col_names, grnd_truth = get_dataset(stock_ticker)
+    '''
+    for item in batch_dataset:
+        print(item['date'])
+        print(item['train_x'].shape[0])
+        print(item['test_x'].shape[0])
+        print(item['train_y'].shape[0])
+        print(item['test_y'].shape[0])
+        print(item['final_window'].shape[0])
+    '''
+    
     sys.exit()
 
-    print(train_x.shape)
+    #print(train_x.shape)
 
-    print(train_x, test_y)
+    #print(train_x, test_y)
+    
+    
 
 
 if __name__ == '__main__':
     main()
+
+    # with open('keys/EOD_API_key.txt') as file:
+    #     token = file.readline()
+    # trading_days = get_trading_dates('TEL', get_dates_five_years(), token).iloc[-1]
+
+    # print(type(trading_days))

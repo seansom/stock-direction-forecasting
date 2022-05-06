@@ -1,10 +1,11 @@
+# extended dates, 5% split
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import keras_tuner as kt
 import os, sys, math, warnings, shutil
-from data_processing_old_2 import get_dataset, inverse_transform_data
+from data_processing_old_5 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -57,7 +58,7 @@ def get_optimal_hps(train_x, train_y):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
-    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.0526, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -88,7 +89,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.0526,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -193,10 +194,10 @@ def experiment(stock_ticker, time_steps, drop_col=None, test_on_val=False, hps=N
         dict: A dictionary of the performance metrics of the created model.
     """
 
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2014-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
 
     if test_on_val:
-        test_len = train_x.shape[0] * 25 // 100
+        test_len = train_x.shape[0] * 526 // 10000
         test_x = train_x[-test_len:]
         test_y = train_y[-test_len:]
 
@@ -403,7 +404,7 @@ def backward_feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
 def get_hps(stock_ticker, dropped_features=None):
 
     # parameters of each model
-    time_steps_list = [1, 5, 10, 15, 20]
+    time_steps_list = [1, 5, 15]
 
     #['cmf', 'atr', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
@@ -413,7 +414,7 @@ def get_hps(stock_ticker, dropped_features=None):
     hps_list = []
 
     for index, time_steps in enumerate(time_steps_list):
-        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
+        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2014-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
         hps = get_optimal_hps(train_x, train_y)
         hps_list.append(hps)
 
@@ -489,7 +490,7 @@ def main():
 
 def batch_test(stock_ticker, dropped_features=None, hps_list=None):
 
-    time_steps = [1, 5, 10, 15, 20]
+    time_steps = [1, 5, 15]
     repeats = 10
 
     if dropped_features is None:
@@ -567,10 +568,10 @@ if __name__ == '__main__':
 
     # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
 
-    stock_ticker = 'PGOLD'
+    stock_ticker = 'MER'
 
     dropped_features = []
-    time_steps = [1, 5, 10, 15, 20]
+    time_steps = [1, 5, 15]
 
     for step in time_steps:
         curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
