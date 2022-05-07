@@ -1,10 +1,11 @@
+# extended dates, 5% split
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
 import keras_tuner as kt
 import os, sys, math, warnings, shutil
-from data_processing_old_3 import get_dataset, inverse_transform_data
+from data_processing_old_5 import get_dataset, inverse_transform_data
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -57,7 +58,7 @@ def get_optimal_hps(train_x, train_y):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
-    tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
+    tuner.search(train_x, train_y, validation_split=0.0526, callbacks=[early_stopping_callback])
 
     # hps is a dictionary of optimal hyperparameter levels
     hps = (tuner.get_best_hyperparameters(num_trials=1)[0]).values.copy()
@@ -88,7 +89,7 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
     print_train_progress_callback = CustomCallback(epochs)
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.0526,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
@@ -193,10 +194,10 @@ def experiment(stock_ticker, time_steps, drop_col=None, test_on_val=False, hps=N
         dict: A dictionary of the performance metrics of the created model.
     """
 
-    scaler, col_names, _, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
+    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=('2014-04-13', '2022-04-13'), time_steps=time_steps, drop_col=drop_col)
 
     if test_on_val:
-        test_len = train_x.shape[0] * 25 // 100
+        test_len = train_x.shape[0] * 526 // 10000
         test_x = train_x[-test_len:]
         test_y = train_y[-test_len:]
 
@@ -221,18 +222,8 @@ def experiment(stock_ticker, time_steps, drop_col=None, test_on_val=False, hps=N
 
 
 def feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
-
-    _, col_names, correlations, _, _, _, _ = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=timesteps, drop_col=None)
     
-    features = col_names.copy()
-
-    stock_returns_index = features.index('log_return')
-    features.remove('log_return')
-    correlations.pop(stock_returns_index)
-
-
-    features = [x for _, x in sorted(zip(correlations, features), reverse=True)]
-
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     num_features = len(features)
     dropped_features = features.copy()
 
@@ -240,6 +231,7 @@ def feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
     print("Starting Feature Selection...")
     print(f"Features Tested: 0/{num_features} (current: None)")
     
+
     model_perfs = []
     for _ in range(repeats):
         curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=dropped_features, test_on_val=True, hps=hps)
@@ -279,111 +271,174 @@ def feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
     return dropped_features
 
 
-def get_params(stock_ticker):
+def forward_feature_selection(stock_ticker, time_steps, repeats=10, hps=None):
+    
+    features = ['ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    num_features = len(features)
+    dropped_features = features.copy()
 
-    time_steps_list = [1, 5, 10, 15, 20]
+    print("===================================================")
+    print("Starting Feature Selection...")
+    print(f"Round 0/{num_features}")
+    print(f"Features Tested: 0/{num_features} (current features: [])")
+
+    model_perfs = []
+
+    for _ in range(repeats):
+        curr_model_perf, _, _ = experiment(stock_ticker, time_steps, drop_col=dropped_features, test_on_val=True, hps=hps)
+        model_perfs.append(curr_model_perf['da'])
+
+    curr_best_da = mean(model_perfs)
+    
+    print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
+    print(f"Dropped Features: {dropped_features}")
+    print("===================================================")
+
+    added_features = []
+    curr_mean_model_perfs = [0] * (len(features) + 1)
+    curr_mean_model_perfs[0] = curr_best_da
+
+    for test_round in range(num_features):
+
+        prev_round_best_da = curr_best_da
+
+        for index, feature in enumerate(features):
+
+            if feature in added_features:
+                continue
+
+            added_features.append(feature)
+
+            print(f"Round {test_round + 1}/{num_features}")
+            print(f"Features Tested: {index + 1}/{num_features} (current features: {added_features})")
+
+            model_perfs = []
+
+            dropped_features = features.copy()
+            for added_feature in added_features:
+                dropped_features.remove(added_feature)
+
+            for _ in range(repeats):
+                curr_model_perf, _, _ = experiment(stock_ticker, time_steps, drop_col=dropped_features, test_on_val=True, hps=hps)
+                model_perfs.append(curr_model_perf['da'])
+
+            curr_da = mean(model_perfs)
+            curr_mean_model_perfs[index + 1] = curr_da
+
+            if curr_da > curr_best_da:
+                curr_best_da = curr_da
+
+            added_features.remove(feature)
+
+            print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+            print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+            print("===================================================")
+
+        if curr_best_da <= prev_round_best_da:
+            break
+
+        curr_best_feature_index = curr_mean_model_perfs.index(curr_best_da) - 1
+        added_features.append(features[curr_best_feature_index])
+
+    dropped_features = features.copy()
+    for added_feature in added_features:
+        dropped_features.remove(added_feature)
+
+    print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+    print(f"Added Features: {added_features}")
+    print(f"Dropped Features: {dropped_features}")
+    print("===================================================")
+    
+    return dropped_features
+
+
+def backward_feature_selection(stock_ticker, timesteps, repeats=20, hps=None):
+    
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    num_features = len(features)
     dropped_features = []
 
-    for step in time_steps_list:
-        curr_dropped_features = feature_selection(stock_ticker, step, repeats=12, hps=None)
-        dropped_features.append(curr_dropped_features)
+    print("===================================================")
+    print("Starting Feature Selection...")
+    print(f"Features Tested: 0/{num_features} (current dropped: {dropped_features})")
+    
+
+    model_perfs = []
+    for _ in range(repeats):
+        curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=None, test_on_val=True, hps=hps)
+        model_perfs.append(curr_model_perf['da'])
+
+    curr_best_da = mean(model_perfs)
+    
+    print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
+    print(f"Current Features: {features}")
+    print("===================================================")
+
+
+    for index, feature in enumerate(features):
+
+        model_perfs = []
+        dropped_features.append(feature)
+
+        print(f"Features Tested: {index + 1}/{num_features} (current dropped: {dropped_features})")
+
+        for _ in range(repeats):
+            curr_model_perf, _, _ = experiment(stock_ticker, timesteps, drop_col=dropped_features, test_on_val=True, hps=hps)
+            model_perfs.append(curr_model_perf['da'])
+
+        curr_da = mean(model_perfs)
+
+        if curr_da > curr_best_da:
+            curr_best_da = curr_da
+        else:
+            dropped_features.remove(feature)
+
+        print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+        print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+        
+        print(f"Current Features: {[feature for feature in features if feature not in dropped_features]}")
+        print("===================================================")
+
+    return dropped_features
+
+def get_hps(stock_ticker, dropped_features=None):
+
+    # parameters of each model
+    time_steps_list = [1, 5, 15]
+
+    #['cmf', 'atr', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+
+    if dropped_features is None:
+        dropped_features = [None] * len(time_steps_list)
 
     hps_list = []
 
     for index, time_steps in enumerate(time_steps_list):
-        _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2017-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
+        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=('2014-04-13', '2022-04-13'), time_steps=time_steps, drop_col=dropped_features[index])
         hps = get_optimal_hps(train_x, train_y)
         hps_list.append(hps)
 
+    for i in hps_list:
+        print(i)
 
-    print(dropped_features)
-    print(hps_list)
-
-
-    repeats = 10
-    average_performances = [0] * len(time_steps_list)
-
-    for index in range(len(time_steps_list)):
-        print("===================================================")
-        performances = []
-
-        for i in range(repeats):
-            print(f"Experiment {i + 1} / {repeats}")
-            perf, _, _ = experiment(stock_ticker, time_steps_list[index], drop_col=dropped_features[index], hps=hps_list[index])
-            performances.append(perf)
-            print("===================================================")
-
-        mean_da = mean([perf['da'] for perf in performances])
-        mean_uda = mean([perf['uda'] for perf in performances])
-        mean_dda = mean([perf['dda'] for perf in performances])
-
-        std_da = stdev([perf['da'] for perf in performances])
-        std_uda = stdev([perf['uda'] for perf in performances])
-        std_dda = stdev([perf['dda'] for perf in performances])
-        
-        optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
-        pessimistic_baseline = 1 - optimistic_baseline
-
-        print(f'Stock: {stock_ticker}')
-
-        print()
-        
-        print(f'Total Ups: {performances[0]["total_ups"]}')
-        print(f'Total Downs: {performances[0]["total_downs"]}')
-
-        print()
-
-        # Print average accuracies of the built models
-        print(f"Mean DA: {round(mean_da, 6)}")
-        print(f"Mean UDA: {round(mean_uda, 6)}")
-        print(f"Mean DDA: {round(mean_dda, 6)}")
-
-        print()
-
-        print(f"Standard Dev. DA: {round(std_da, 6)}")
-        print(f"Standard Dev. UDA: {round(std_uda, 6)}")
-        print(f"Standard Dev. DDA: {round(std_dda, 6)}")
-
-        print()
-
-        print(f"Optimistic Baseline DA: {round(optimistic_baseline, 6)}")
-        print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
-
-        average_performances[index] = mean_da
-
-
-    print(dropped_features)
-    print(hps_list)
-
-
-    best_hps_index = average_performances.index(max(average_performances))
-
-    best_dropped_features = dropped_features[best_hps_index]
-    best_hps = hps_list[best_hps_index]
-    best_time_steps = timestepslist[best_hps_index]
-
-    return {
-        'dropped_features': best_dropped_features,
-        'hps': best_hps,
-        'time_steps': best_time_steps
-    }
+    return hps_list
 
 
 
 def main():
     # stock to be predicted
-    stock_ticker = 'PGOLD'
+    stock_ticker = 'MER'
 
     # parameters of each model
     time_steps = 1
 
-    hps = {'units': 256, 'layers': 5, 'dropout': 0.2, 'tuner/epochs': 4, 'tuner/initial_epoch': 2, 'tuner/bracket': 4, 'tuner/round': 1, 'tuner/trial_id': 'e1a4724beb94b41054479c8b543ceda2'}
+    hps = {'units': 64, 'layers': 3, 'dropout': 0.2, 'tuner/epochs': 4, 'tuner/initial_epoch': 2, 'tuner/bracket': 4, 'tuner/round': 1, 'tuner/trial_id': 'e1a4724beb94b41054479c8b543ceda2'}
 
     # how many models built (min = 2)
     repeats = 2
 
     # dropped features
-    dropped_features = ['wr', 'cmf', 'rsi', 'cci', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    dropped_features = None#['divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment', 'ad', 'atr', 'rsi', 'cci', 'slope', 'k_values', 'macd', 'signal']
 
     
     print("===================================================")
@@ -435,7 +490,7 @@ def main():
 
 def batch_test(stock_ticker, dropped_features=None, hps_list=None):
 
-    time_steps = [1, 5, 10, 15, 20]
+    time_steps = [1, 5, 15]
     repeats = 10
 
     if dropped_features is None:
@@ -509,11 +564,24 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
+    main()
 
     # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
 
-    stock_ticker = 'ALI'
+    # stock_ticker = 'MER'
 
-    params = get_params(stock_ticker)
-    print(params)
+    # dropped_features = []
+    # time_steps = [1, 5, 15]
+
+    # for step in time_steps:
+    #     curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
+    #     dropped_features.append(curr_dropped_features)
+
+    # hps_list = get_hps(stock_ticker, dropped_features)
+
+    # batch_test(stock_ticker, dropped_features, hps_list)
+    # print('===============')
+    # print(dropped_features)
+    # print(hps_list)
+
+

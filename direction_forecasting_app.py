@@ -218,7 +218,7 @@ def experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window
     # get model performance statistics
     perf = get_lstm_model_perf(predictions, test_y_copy)
 
-    return perf, test_y_copy, predictions, final_prediction
+    return lstm_model, perf, test_y_copy, predictions, final_prediction
 
 
 def main():
@@ -240,7 +240,7 @@ def main():
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
         scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=time_steps, drop_col=None)
-        perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps)
+        _, perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps)
         performances.append(perf)
         final_predictions.append(final_prediction)
         print("===================================================")

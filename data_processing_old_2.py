@@ -1046,8 +1046,8 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     feature_selection_train_x = train.to_numpy()[:-1]
     feature_selection_train_y = train.to_numpy()[1:, stock_returns_index]
 
-    mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y, random_state=0)
-    mutual_infos = [round(abs(i), 6) for i in mutual_infos]
+    correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
+    correlations = [round(abs(i), 6) for i in correlations]
 
     # print(data)
     # print(list(data))

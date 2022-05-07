@@ -181,7 +181,10 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
     
-    url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    if indicator != 'macd':
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    else:
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
 
     response = requests_get(url)
     data = response.json()
@@ -271,7 +274,8 @@ def get_technical_data(stock_ticker, date_range):
 
     # get available technical indicators from API. format: (indicator, period)
     EOD_indicators = [('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('slope', 5), ('stochastic', 5), ('macd', 5)]
-
+    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
+    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
     for indicator, period in EOD_indicators:
         # print(indicator, period)
@@ -921,7 +925,7 @@ def scale_data(data):
     return data
 
 
-def train_test_split(data, time_steps=1):
+def train_test_split(data, time_steps):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -930,17 +934,9 @@ def train_test_split(data, time_steps=1):
 
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
-    """
-    
-    test_len = (len(data) - time_steps) * 5 // 100
-
+    """	
+    test_len = len(data) * 2 // 10
     train, test = data[:-test_len], data[-test_len - time_steps:]
-    
-    # print(len(data))
-    # print(test_len, time_steps)
-    # print(len(train))
-    # print(len(test))
-    # sys.exit()
     return train, test
 
 
@@ -1050,8 +1046,8 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     feature_selection_train_x = train.to_numpy()[:-1]
     feature_selection_train_y = train.to_numpy()[1:, stock_returns_index]
 
-    mutual_infos = mutual_info_regression(feature_selection_train_x, feature_selection_train_y, random_state=0)
-    mutual_infos = [round(abs(i), 6) for i in mutual_infos]
+    correlations = r_regression(feature_selection_train_x, feature_selection_train_y)
+    correlations = [round(abs(i), 6) for i in correlations]
 
     # print(data)
     # print(list(data))
@@ -1065,7 +1061,7 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
     #apply Yeo-Johnson Power Transfrom
     scaler, train, test, col_names = transform_data(train, test)
 
-    return scaler, train, test, col_names
+    return scaler, train, test, col_names, correlations
 
 
 def make_data_window(train, test, time_steps=1):
@@ -1162,18 +1158,19 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     # has its own database (sentiment data folder) and is handled within the function itself
     sentimental_data = get_sentimental_data(stock_ticker, date_range)
 
-    scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col, time_steps)
+    scaler, train, test, col_names, correlations = data_processing(technical_data, fundamental_data, sentimental_data, drop_col, time_steps)
     train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
 
-    return scaler, col_names, train_x, train_y, test_x, test_y
+    return scaler, col_names, correlations, train_x, train_y, test_x, test_y
 
 
 def main():
-    stock_ticker = 'ALI'
-    scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
+    stock_ticker = 'AP'
+    scaler, col_names, correlations, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     print(col_names)
+    print(correlations)
     sys.exit()
 
     print(train_x.shape)

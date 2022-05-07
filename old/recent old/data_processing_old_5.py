@@ -6,7 +6,7 @@ from sklearn.feature_selection import mutual_info_classif, r_regression, mutual_
 
 from decimal import Decimal
 from sklearn import preprocessing
-from sklearn.preprocessing import PowerTransformer
+from sklearn.preprocessing import PowerTransformer, StandardScaler, RobustScaler
 from eventregistry import *
 from statistics import mean
 

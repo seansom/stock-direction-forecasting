@@ -63,8 +63,8 @@ def get_optimal_hps(data):
     hypermodel_builder = lambda hp: make_lstm_hypermodel(hp, time_steps, features)
 
     # if overwrite is false, previously-saved computed hps will be used
-    tuner = kt.Hyperband(hypermodel_builder, objective='val_binary_accuracy', max_epochs=1000, factor=3, overwrite=True)
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_binary_accuracy', patience=250, mode='max', restore_best_weights=True)
+    tuner = kt.Hyperband(hypermodel_builder, objective='val_binary_accuracy', max_epochs=100, factor=3, overwrite=True)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_binary_accuracy', patience=3, mode='max', restore_best_weights=True)
 
     # execute Hyperband search of optimal hyperparameters
     tuner.search(train_x, train_y, validation_split=0.1, callbacks=[early_stopping_callback])
@@ -194,7 +194,7 @@ def experiment(data):
     actuals = []
 
     epochs = 100
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_binary_accuracy', patience=250, mode='max', restore_best_weights=True)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_binary_accuracy', patience=3, mode='max', restore_best_weights=True)
     print_train_progress_callback = CustomCallback(epochs)
 
     curr_directional_accuracy = 0
@@ -210,15 +210,15 @@ def experiment(data):
 
         lstm_model = make_lstm_model(input_shape)
 
-        # shuffled_train_indices = list(range(train_x.shape[0]))
+        shuffled_train_indices = list(range(train_x.shape[0]))
 
-        # random.seed(0)
-        # random.shuffle(shuffled_train_indices)
+        random.seed(0)
+        random.shuffle(shuffled_train_indices)
 
-        # shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-        # shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
+        shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
+        shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
 
-        lstm_model.fit(train_x, train_y, epochs=1000, validation_split=0.1, verbose=1, callbacks=[early_stopping_callback])
+        lstm_model.fit(shuffled_train_x, shuffled_train_y, epochs=100, validation_split=0.1, verbose=1, callbacks=[early_stopping_callback])
 
         curr_predictions = list(forecast_lstm_model(lstm_model, test_x))
         curr_actuals = [test_y[i, -1] for i in range(len(test_y))]
@@ -422,10 +422,10 @@ def main():
     # parameters of each model
     time_steps = 10
     train_size = 1004
-    test_size = 10
+    test_size = 21
 
     # how many models built (min = 2)
-    repeats = 4
+    repeats = 2
 
     # dropped features
     dropped_features = None
@@ -494,12 +494,12 @@ def main():
 
 def test():
     # stock to be predicted
-    stock_ticker = 'BPI'
+    stock_ticker = 'AP'
 
     # parameters of each model
     time_steps = 10
     train_size = 1004
-    test_size = 5
+    test_size = 21
 
     # dropped features
     dropped_features = None
