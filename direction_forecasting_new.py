@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import keras_tuner as kt
 import os, sys, math, warnings, shutil
-from data_processing_new import get_dates_five_years, get_trading_dates, get_dataset, inverse_transform_data, get_final_window, scale_transform_window
+from data_processing_new import get_dates_five_years, get_trading_dates, get_dataset, inverse_transform_data, get_transformed_final_window
 
 
 class CustomCallback(keras.callbacks.Callback):
@@ -231,35 +231,21 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
 
 
 
-def make_forecast(stock_ticker, model_dict):
+
+
+def make_model_forecast(model_dict, final_window):
 
     model = model_dict['model']
-    linear_scaler = model_dict['linear_scaler']
     scaler = model_dict['scaler']
     col_names = model_dict['col_names']
-
-    time_steps = model_dict['params']['time_steps']
-    dropped_features = model_dict['params']['dropped_features']
-
-
-    date_range = get_dates_five_years()
-
-    with open('keys/EOD_API_key.txt') as file:
-        token = file.readline()
-
-    last_observed_trading_day = (get_trading_dates(stock_ticker, date_range, token)).iloc[-1]
-
-    final_window = get_final_window(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=dropped_features)
-
-    final_window = scale_transform_window(final_window, linear_scaler, scaler, col_names)
 
     final_prediction = forecast_lstm_model(model, final_window)
     final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="log_return")
 
     final_prediction = [i.tolist() for i in final_prediction][0]
-    # final_prediction = 1 if final_prediction >= 0 else 0
+    final_prediction = 1 if final_prediction >= 0 else 0
 
-    return final_prediction, last_observed_trading_day
+    return final_prediction
 
 
 
@@ -504,7 +490,10 @@ def test_forecast():
 
     }
 
-    print(make_forecast(stock_ticker, model_dict))
+    final_window, last_observed_trading_day = get_transformed_final_window(stock_ticker, model_dict)
+
+    for i in range(2):
+        print(make_model_forecast(model_dict, final_window))
 
 
 if __name__ == '__main__':
@@ -521,5 +510,5 @@ if __name__ == '__main__':
     # params = get_params(stock_ticker)
     # print(params)
 
-    for _ in range(5):
-        test_forecast()
+
+    test_forecast()

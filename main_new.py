@@ -1,15 +1,13 @@
-from tkinter.messagebox import NO
-from turtle import update
 from tensorflow import keras, compat
 from statistics import mean, stdev
-import keras_tuner as kt
 import numpy as np
 import pandas as pd
-import os, sys, math, copy, shutil, shelve, warnings, json, datetime
+import os, sys, math, copy, shutil, shelve, warnings, json, datetime, ctypes
 from sklearn.preprocessing import PowerTransformer
-from data_processing_new import get_dataset, inverse_transform_data, get_dates_five_years, get_trading_dates, get_final_window, scale_transform_window
-from direction_forecasting_new import CustomCallback, make_lstm_hypermodel, get_optimal_hps, make_lstm_model, forecast_lstm_model, get_lstm_model_perf, print_model_performance, experiment, make_forecast
+from data_processing_new import get_dataset, get_dates_five_years, get_trading_dates, get_transformed_final_window
+from direction_forecasting_new import get_optimal_hps, experiment, make_model_forecast
 from PyQt5 import QtWidgets as qtw
+from PyQt5 import QtGui
 from PyQt5.QtCore import QThread
 from mainwindow import Ui_MainWindow
 
@@ -68,6 +66,11 @@ class MainWindow(qtw.QMainWindow):
         self.ui.tune_model_button.clicked.connect(self.run_tuning_thread)
 
 
+        self.setWindowIcon(QtGui.QIcon('stonks_project_icon.png'))
+        appid = 'CoE/EcE 199 Capstone Project - Sombrito, Gonzales, Nolasco'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
+
+
     def disable_ui(self):
         self.ui.stock_ticker_line_edit1.setEnabled(False)
         self.ui.predict_button.setEnabled(False)
@@ -84,6 +87,27 @@ class MainWindow(qtw.QMainWindow):
         self.ui.get_model_button.setEnabled(True)
         self.ui.stock_ticker_line_edit3 .setEnabled(True)
         self.ui.tune_model_button.setEnabled(True)
+
+
+    def clear_predictions_ui(self):
+
+        repeats = 5
+
+        self.ui.models_progress_label.setText(f'0 / {repeats}')
+        self.ui.train_progress_label.setText('0 %')
+        self.ui.prediction_progress_label.setText('0 %')
+
+        self.ui.last_tuning_date_label1.setText('-')
+        self.ui.mean_da_label.setText('-')
+        self.ui.mean_uda_label.setText('-')
+        self.ui.mean_dda_label.setText('-')
+        self.ui.stdev_da_label.setText('-')
+        self.ui.stdev_uda_label.setText('-')
+        self.ui.stdev_dda_label.setText('-')
+
+        self.ui.result_stock_ticker_label.setText('-')
+        self.ui.result_last_trading_day_label.setText('-')
+        self.ui.result_prediction_label.setText('-')
 
 
     def get_params(self, stock_ticker):
@@ -148,7 +172,7 @@ class MainWindow(qtw.QMainWindow):
             date_range = ('2017-04-13', '2022-04-13')
 
         performances = []
-        repeats = 2
+        repeats = 5
 
         self.ui.models_progress_label.setText(f'0 / {repeats}')
         print("===================================================")
@@ -204,6 +228,8 @@ class MainWindow(qtw.QMainWindow):
             'std_da': std_da,
             'std_uda': std_uda,
             'std_dda': std_dda,
+            'total_ups': total_ups,
+            'total_downs': total_downs,
             'optimistic_baseline': optimistic_baseline,
             'pessimistic_baseline': pessimistic_baseline
         }
@@ -215,9 +241,10 @@ class MainWindow(qtw.QMainWindow):
 
     def make_prediction(self):
 
-        repeats = 2
+        repeats = 5
 
         self.disable_ui()
+        self.clear_predictions_ui()
 
         try:
             stock_ticker = self.ui.stock_ticker_line_edit1.text()
@@ -258,17 +285,29 @@ class MainWindow(qtw.QMainWindow):
                 self.ui.prediction_progress_label.setText('100.0 %')
                 self.ui.models_progress_label.setText(f'{repeats} / {repeats}')
 
+            mean_da = model_info['mean_da']
+            mean_uda = model_info['mean_uda']
+            mean_dda = model_info['mean_dda']
+
+            std_da = model_info['std_da']
+            std_uda = model_info['std_uda']
+            std_dda = model_info['std_dda']
+
+            total_ups = model_info['total_ups']
+            total_downs = model_info['total_downs']
+
+            optimistic_baseline = model_info['optimistic_baseline']
+            pessimistic_baseline = model_info['pessimistic_baseline']
 
             self.ui.last_tuning_date_label1.setText(last_model_tuning_date)
-            self.ui.mean_da_label.setText(str(model_info['mean_da']))
-            self.ui.mean_uda_label.setText(str(model_info['mean_uda']))
-            self.ui.mean_dda_label.setText(str(model_info['mean_dda']))
-            self.ui.stdev_da_label.setText(str(model_info['std_da']))
-            self.ui.stdev_uda_label.setText(str(model_info['std_uda']))
-            self.ui.stdev_dda_label.setText(str(model_info['std_dda']))
+            self.ui.mean_da_label.setText(str(mean_da))
+            self.ui.mean_uda_label.setText(str(mean_uda))
+            self.ui.mean_dda_label.setText(str(mean_dda))
+            self.ui.stdev_da_label.setText(str(std_da))
+            self.ui.stdev_uda_label.setText(str(std_uda))
+            self.ui.stdev_dda_label.setText(str(std_dda))
 
             self.ui.result_stock_ticker_label.setText(stock_ticker)
-
 
             forecasts = []
 
@@ -289,10 +328,52 @@ class MainWindow(qtw.QMainWindow):
                     'params': params
                 }
 
-                forecast, last_observed_trading_day = make_forecast(stock_ticker, model_dict)
+                if i == 0:
+                    final_window, last_observed_trading_day = get_transformed_final_window(stock_ticker, model_dict)
+                    self.ui.result_last_trading_day_label.setText(last_observed_trading_day)
+
+                forecast = make_model_forecast(model_dict, final_window)
                 forecasts.append(forecast)
 
-            print(forecasts)
+            majority_prediction = 'Upward' if sum(forecasts) > len(forecasts) / 2 else 'Downward'
+            self.ui.result_prediction_label.setText(majority_prediction)
+
+
+            print()
+            print("===================================================")
+            
+            print(f'Stock: {stock_ticker}')
+
+            print()
+
+            print(f'Total Ups: {total_ups}')
+            print(f'Total Downs: {total_downs}')
+
+            print()
+
+            # print average accuracies of the built models
+            print(f"Mean DA: {mean_da}")
+            print(f"Mean UDA: {mean_uda}")
+            print(f"Mean DDA: {mean_dda}")
+
+            print()
+
+            print(f"Standard Dev. DA: {std_da}")
+            print(f"Standard Dev. UDA: {std_uda}")
+            print(f"Standard Dev. DDA: {std_dda}")
+
+            print()
+
+            print(f"Optimistic Baseline DA: {optimistic_baseline}")
+            print(f"Pessimistic Baseline DA: {pessimistic_baseline}")
+
+            print()
+
+            print(f'Direction Forecasts: {forecasts}')
+            print(f'Majority Forecast: {majority_prediction}')
+            
+            print("===================================================")
+
 
             self.ui.status_label1.setText('Idle')
             self.ui.status_label2.setText('Idle')

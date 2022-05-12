@@ -242,14 +242,6 @@ def main():
         scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=time_steps, drop_col=None)
         _, perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps)
         performances.append(perf)
-
-        print(final_prediction)
-        print(type(final_prediction))
-        print('=======================')
-
-        sys.exit()
-
-
         final_predictions.append(final_prediction)
         print("===================================================")
 
@@ -293,5 +285,3 @@ def main():
     print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
 
     print(f'Final Predictions: {final_predictions}')
-
-main()
