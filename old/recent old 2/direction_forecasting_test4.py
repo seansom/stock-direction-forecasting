@@ -276,7 +276,7 @@ def get_params(stock_ticker):
     dropped_features = []
 
     for step in time_steps_list:
-        curr_dropped_features = feature_selection(stock_ticker, step, repeats=12, hps=None)
+        curr_dropped_features = feature_selection(stock_ticker, step, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
 
     hps_list = []
@@ -351,7 +351,17 @@ def get_params(stock_ticker):
 
     best_dropped_features = dropped_features[best_hps_index]
     best_hps = hps_list[best_hps_index]
-    best_time_steps = timestepslist[best_hps_index]
+    best_time_steps = time_steps_list[best_hps_index]
+
+    print('===========================')
+
+    for i in dropped_features:
+        print(i)
+
+    for i in hps_list:
+        print(i)
+
+    print('===========================')
 
     return {
         'dropped_features': best_dropped_features,

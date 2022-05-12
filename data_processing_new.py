@@ -1,16 +1,16 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import datetime, requests, json, math, shelve, sys, os, re, pathlib
+
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
-from pattern.en import lexeme
-import datetime, requests, json, math, shelve, sys, os, re, pathlib, random, nltk, shutil, zipfile
-
 
 def requests_get(url):
+
     while True:
         try:
             return requests.get(url, timeout=10)
@@ -18,8 +18,9 @@ def requests_get(url):
             print('Timeout. Restarting request...')
             continue
 
+
 #get_technical_data START
-def get_dates_five_years(testing=False, init_date=None):
+def get_dates_five_years(testing=False):
     """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
 
     Args:
@@ -29,31 +30,28 @@ def get_dates_five_years(testing=False, init_date=None):
         tuple: (from_date, to_date)
     """
 
-    if testing or init_date == 'Never':
-        return ('2017-02-13', '2022-02-11')
+    if testing:
+        return ('2017-04-13', '2022-04-13')
 
-    if init_date is None:
-        # generate datetime objects
-        date_today = datetime.datetime.now()
-        date_five_years_ago = date_today - datetime.timedelta(days=round(365.25 * 5))
-    
-    else:
-        date_five_years_ago = datetime.datetime.strptime(init_date, '%Y-%m-%d') - datetime.timedelta(days=round(365.25 * 5))
+    # generate datetime objects
+    date_today = datetime.datetime.now()
+    date_five_years_ago = date_today - datetime.timedelta(days=round(365.25 * 5))
 
     return (date_five_years_ago.strftime('%Y-%m-%d'), date_today.strftime('%Y-%m-%d'))
 
 
 def get_trading_dates(stock_ticker, date_range, token):
+
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
 
-    response = requests.get(url)
+    response = requests_get(url)
     data = response.json()
 
     # convert to pd.dataframe
-    data = pd.json_normalize(data)
+    trading_dates = (pd.json_normalize(data))['date']
 
-    return data['date']
+    return trading_dates
 
 
 def get_technical_indicators(data):
@@ -95,7 +93,7 @@ def get_technical_indicators(data):
         ad.append(curr_ad)
 
     # compute William's %R indicator values
-    wr_period = 14
+    wr_period = 5
     wr = [np.NaN] * (wr_period - 1)
 
     for i in range(wr_period, data_len + 1):
@@ -110,7 +108,7 @@ def get_technical_indicators(data):
         wr.append(curr_wr)
 
     # compute Chaulkin Money Flow indicator
-    cmf_period = 20
+    cmf_period = 5
 
     mfv = []
     cmf = [np.NaN] * (cmf_period - 1)
@@ -168,7 +166,10 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
     adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
     
-    url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    if indicator != 'macd':
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    else:
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
 
     response = requests_get(url)
     data = response.json()
@@ -197,6 +198,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     # this error may be fixed by increasing timedelta used in computing adjusted_first_day
     if data['date'][0] != date_range[0]:
         raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
+
 
     return data
 
@@ -228,7 +230,7 @@ def get_technical_data(stock_ticker, date_range):
 
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={adjusted_first_day}&to={last_trading_day}"
-    
+
     response = requests_get(url)
     data = response.json()
 
@@ -256,10 +258,12 @@ def get_technical_data(stock_ticker, date_range):
     data = data.reset_index(drop=True)
 
     # get available technical indicators from API. format: (indicator, period)
-    EOD_indicators = [('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 14), ('stochastic', 14), ('macd', 26)]
+    EOD_indicators = [('atr', 5), ('rsi', 5), ('cci', 5), ('adx', 5), ('slope', 5), ('stochastic', 5), ('macd', 5)]
+    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14), ('slope', 3), ('stochastic', 14), ('macd', 26)]
+    #[('atr', 14), ('rsi', 14), ('cci', 20), ('adx', 14)]
 
     for indicator, period in EOD_indicators:
-        #print(indicator, period)
+        # print(indicator, period)
         indicator_data = get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, (first_trading_day, last_trading_day))
         data = data.merge(indicator_data, on='date')
 
@@ -576,33 +580,13 @@ def get_fundamental_data(stock_ticker, date_range):
 #get_fundamental_data END
 
 #get_sentimental_data START
-def pattern_stopiteration_workaround():
-    try:
-        nltk.data.find('corpora/omw-1.4')
-    except LookupError:
-        nltk.download('omw-1.4')
-    
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        nltk.download('punkt')
-    
-    try:
-        nltk.data.find('taggers/averaged_perceptron_tagger')
-    except LookupError:
-        nltk.download('averaged_perceptron_tagger')
-
-    try:
-        lexeme('gave')
-    except:
-        pass
-
-
 def get_dates_between(start_date, end_date):
     """Returns a list of dates in yyyy-mm-dd format between two given dates.
+
     Args:
         start_date (str): The starting date.
         end_date (str): The ending date.
+
     Returns:
         list: A list of date strings.
     """
@@ -619,89 +603,62 @@ def get_dates_between(start_date, end_date):
     
     return date_list
 
-
 def clean_text(text):
     """Cleans an input text (sentence).
+
     Args:
         text (str): The text to be cleaned.
+
     Returns:
         string: The cleaned text.
     """
 
     # remove all non-letters (punctuations, numbers, etc.)
-    processed_text = re.sub("[^a-zA-Z]", " ", text)
+    processed_text = re.sub("[^a-zA-z]", " ", text)
     # remove single characters
-    processed_text = re.sub(r"\s+[a-zA-Z]\s+", " ", processed_text)
+    processed_text = re.sub(r"\s+[a-zA-z]\s+", " ", processed_text)
     # remove multiple whitespaces
-    processed_text = re.sub(r"\s+", " ", processed_text)
-
-    # clean more
-    processed_text = re.sub(r"\s+[a-zA-Z]\s+", " ", processed_text)
     processed_text = re.sub(r"\s+", " ", processed_text)
     
     return processed_text
 
-
 def text_to_int(vocab, texts, max_seq_length):
     """Converts a set of texts (sentences) into their numerical representations.
+
     Args:
         vocab (dict): A dictionary with words as keys and their integer equivalent as values.
         texts (list): The list of texts (sentences) to be converted.
         max_seq_length (int): The length of the longest sentence during model building.
+
     Returns:
         list: A list of lists wherein each element represents the numerical representation of a specific text (sentence).
     """
 
-    # verb tags (possible verb tenses/forms)
-    verb_tags = ["VB", "VBD", "VBG", "VBN", "VBP", "VBZ"]
-
     sequences = []
     for text in texts:
-        tokenized_text = nltk.word_tokenize(text)
-        tags = nltk.pos_tag(tokenized_text)
-        
-        verb_dict = dict()
-        for tag in tags:
-            if tag[1] in verb_tags:
-                # lexeme outputs a list of possible forms/tenses of given verb
-                # [base, present, progressive, past]
-                verb_dict[tag[0].lower()] = lexeme(tag[0].lower())
-
+        text_list = text.split()
         sequence = []
-        tokenized_clean_text = clean_text(text).lower().split()
-        for word in tokenized_clean_text:
-            if word in vocab:
-                sequence.append(vocab[word])
-            # words that are not verbs and not in the dictionary will have a value of 0
-            elif word not in verb_dict:
+        for word in text_list:
+            # words not in the dictionary will have a value of 0
+            if word not in vocab:
                 sequence.append(0)
-            # if current word is verb
             else:
-                appended = 0
-                possible_forms = verb_dict[word]
-                for possible_form in possible_forms:
-                    if possible_form in vocab:
-                        sequence.append(vocab[possible_form])
-                        appended = 1
-                        break
-                
-                # set to 0 if all possible still not in vocab
-                if not appended:
-                    sequence.append(0)
-            
+                sequence.append(vocab[word])
+
             # truncate sentences longer than max_seq_length
             if len(sequence) == max_seq_length:
                 break
-        
+
         sequences.append(sequence)
-
+    
     return sequences
-
 
 def load_json_to_dict(path_file_name):
     """Loads a json file to a dictionary.
+
     Args:
         path_file_name (str): The json file name or the path to it.
+
     Returns:
         dict: A dictionary that contains the json file contents.
     """
@@ -712,17 +669,16 @@ def load_json_to_dict(path_file_name):
 
     return data
 
-
 def get_news(stock_ticker, date_range, historical=False):
     """Gets news data from News API.
+
     Args:
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
         historical (bool, optional): If set to true, access historical news data. Defaults to False.
+
     Returns:
-        tuple: (list, dict)
-            list: A list containing raw (complete with extras) news data.
-            dict: A dictionary with dates as keys and the corresponding news data as values.
+        dict: A dictionary with dates as keys and the corresponding news headlines as values.
     """
 
     # related terms for each stock ticker (will be updated in the future to include all stocks in PSE)
@@ -748,74 +704,62 @@ def get_news(stock_ticker, date_range, historical=False):
 
         er = EventRegistry(apiKey=token, allowUseOfArchive=False)
     
-    start_date = datetime.datetime.strptime(date_range[0], '%Y-%m-%d')
-    start_date = (start_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-
     q = QueryArticlesIter(
-        dateStart=start_date,
+        keywords=QueryItems.OR(ticker_terms[stock_ticker]),
+        dateStart=date_range[0],
         dateEnd=date_range[1],
-        keywords=QueryItems.OR(ticker_terms[stock_ticker]), 
         sourceLocationUri=er.getLocationUri("Philippines"),
         keywordsLoc="body,title",
         ignoreKeywords=QueryItems.OR(["PBA", "basketball"]),
-        ignoreConceptUri=QueryItems.OR([er.getConceptUri("PBA"), er.getConceptUri("basketball"), er.getConceptUri("Sports")]),
         ignoreCategoryUri=er.getCategoryUri("Sports"),
         isDuplicateFilter="skipDuplicates",
         hasDuplicateFilter="skipHasDuplicates"
         )
 
-    raw_news = []
     news_dict = dict()
+    curr_date_news = []
+    count = 0
     for article in q.execQuery(er, sortBy="date", sortByAsc=True, maxItems=q.count(er)):
-        raw_news.append(article)
-
-        date = ""
+        date = article["date"]
         title = article["title"]
-        body = article["body"]
-        curr_news = [title, body]
-        
-        if ("dateTimePub" in article) and (article["dateTimePub"] != None):
-            dateTime = article["dateTimePub"]
-            dateTime = re.sub("[a-zA-Z]", "", dateTime)
-            dateTime = datetime.datetime.strptime(dateTime, '%Y-%m-%d%H:%M:%S')
-            date = (dateTime + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
-        else:
-            dateTime = article["dateTime"]
-            dateTime = re.sub("[a-zA-Z]", "", dateTime)
-            dateTime = datetime.datetime.strptime(dateTime, '%Y-%m-%d%H:%M:%S')
-            date = (dateTime + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
-        
-        if (date < date_range[0]) or (date > date_range[1]):
+        if count == 0:
+            curr_date = date
+            count += 1
+            curr_date_news.append(title)
             continue
+        if date == curr_date:
+            curr_date_news.append(title)
+            continue
+        news_dict[curr_date] = curr_date_news
+        curr_date_news = []
+        curr_date = date
+        curr_date_news.append(title)
 
-        if date in news_dict:
-            dict_val = news_dict[date]
-            dict_val.append(curr_news)
-            news_dict.update({date: dict_val})
-        else:
-            news_dict[date] = [curr_news]
+    news_dict[curr_date] = curr_date_news
 
-    return raw_news, news_dict
-
+    return news_dict
 
 def get_score(news, vocab, model, max_seq_length):
     """Computes for the average score of a set of news headlines.
+
     Args:
         news (list): A list of news headlines to be scored.
         vocab (dict): A dictionary with words as keys and their integer equivalent as values.
         model (keras.Sequential): The best performing sentiment model to be used for scoring.
         max_seq_length (int): The length of the longest sentence during model building.
+
     Returns:
         np.float32: The average score.
     """
 
-    temp = []
+    # clean headlines
+    clean_headlines = []
     for headline in news:
-        temp.append(headline[0])
-    news = temp
+        clean_headline = clean_text(headline)
+        clean_headlines.append(clean_headline.lower())
 
     # convert into their numerical representations    
-    sequences = text_to_int(vocab, news, max_seq_length)
+    sequences = text_to_int(vocab, clean_headlines, max_seq_length)
     sequences = tf.keras.preprocessing.sequence.pad_sequences(sequences, maxlen = max_seq_length, padding = "post")
     sequences = np.array(sequences)
 
@@ -828,18 +772,16 @@ def get_score(news, vocab, model, max_seq_length):
 
     return mean(scores)
 
-
 def get_sentimental_data (stock_ticker, date_range):
     """Computes and/or access sentimental data for a specific stock. To be used for model training.
+
     Args:
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+
     Returns:
         pd.Dataframe: Dataframe representing the sentiment indicators.
     """
-
-    # ignore raised StopIteration
-    pattern_stopiteration_workaround()
 
     # get trading days
     with open('keys/EOD_API_key.txt') as file:
@@ -851,12 +793,6 @@ def get_sentimental_data (stock_ticker, date_range):
     # load vocab constructed during model building
     vocab = load_json_to_dict("sentiment data/vocab.json")
     # load the best performing model in terms of accuracy
-    if os.path.exists("best sentiment model"):
-        shutil.rmtree("best sentiment model")
-
-    with zipfile.ZipFile("best sentiment model.zip", "r") as zip_ref:
-        zip_ref.extractall()
-        
     model = tf.keras.models.load_model("best sentiment model")
 
     # prepare path/file name of scores file
@@ -876,14 +812,11 @@ def get_sentimental_data (stock_ticker, date_range):
             return pd.DataFrame({"date": dates, "sentiment": sentiments})
         # access additional news data through an API call up to 1 month old
         else:
-            more_news_data = get_news(stock_ticker, (dates_list[-1], date_range[1]), historical=False)
-            latest_news = more_news_data[1]
+            latest_news = get_news(stock_ticker, (dates_list[-1], date_range[1]), historical=False)
 
-            remaining_trading_days = trading_days[trading_days.index(dates_list[-1]):]
-            dates = dates_list
-            dates.pop()
-            sentiments = sentiments_list
-            sentiments.pop()
+            remaining_trading_days = trading_days[trading_days.index(dates_list[-1])+1:]
+            dates = dates_list[dates_list.index(trading_days[0]):]
+            sentiments = sentiments_list[dates_list.index(trading_days[0]):]
 
             # score additional news
             for i in range(len(remaining_trading_days)):
@@ -905,30 +838,21 @@ def get_sentimental_data (stock_ticker, date_range):
                         scores.append(get_score(latest_news[day], vocab, model, max_seq_length))
                 sentiments.append(mean(scores))
             
-            data = pd.DataFrame({"date": dates, "sentiment": sentiments})
-            
-            data.to_csv(scores_path, index=False)
-
-            dates_needed = dates[dates.index(trading_days[0]):]
-            sentiments_needed = sentiments[dates.index(trading_days[0]):]
-
-            return pd.DataFrame({"date": dates_needed, "sentiment": sentiments_needed})
+            return pd.DataFrame({"date": dates, "sentiment": sentiments})
     
     # for when a file containing sentiment scores for a given stock is not present (i.e., data for given stock is not yet in database)
     else: 
         # "guard" against unintentional call of paid News API 
-        message = "Historical news data for " + str(stock_ticker) + " not in database, continue with API call? ('Y' if yes, 'N' to input new stock ticker): "
+        message = "Historical news data for " + str(stock_ticker) + " not in database, continue with API call? ('Y' if yes, 'N' exits current execution): "
         reply = input(message)
         while (reply != "Y" and reply != "N"):
             reply = input(message)
         if reply == "N":
-            print("Please input new stock ticker in app")
-            return None
+            print("Exiting ...")
+            sys.exit()
         
         # access historical news data through an API call
-        news_data = get_news(stock_ticker, (date_range[0], date_range[1]), historical=True)
-        raw_news = news_data[0]
-        news = news_data[1]
+        news = get_news(stock_ticker, (date_range[0], date_range[1]), historical=True)
         
         # make directory for the new stock
         path = "sentiment data/" + str(stock_ticker)
@@ -936,12 +860,7 @@ def get_sentimental_data (stock_ticker, date_range):
             os.mkdir(path)
 
         # save historical news data as json inside created directory
-        raw_news_path = "sentiment data/" + str(stock_ticker) + "/raw_news.json"
-        file = open(raw_news_path, "w")
-        json.dump(raw_news, file)
-        file.close()
-
-        news_path = "sentiment data/" + str(stock_ticker) + "/news.json"
+        news_path = "sentiment data/" + str(stock_ticker) + "/monthly_updated_news.json"
         file = open(news_path, "w")
         json.dump(news, file)
         file.close()
@@ -974,20 +893,24 @@ def get_sentimental_data (stock_ticker, date_range):
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
+    
     Args:
         data (pd.DataFrame): The entire dataset.
+
     Returns:
         pd.DataFrame, pd.DataFrame: Scaled datasets.
     """
-
+    
     linear_scaler = []
 
     for indicator in data.columns:
         if (data[f'{indicator}'] == 0).all():
             linear_scaler.append(1)
             continue
+
         scale_factor = round(math.log10(data[f'{indicator}'].abs().max()))
         linear_scaler.append(scale_factor)
+
         data[f'{indicator}'] = data[f'{indicator}'].apply(lambda x: float(Decimal(x) / Decimal(10 ** (scale_factor))))
 
     return data, linear_scaler
@@ -1003,43 +926,12 @@ def train_test_split(data, time_steps):
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
-    
-    data_len = len(data)
-
-    final_window = data.tail(time_steps)
-    
-    target_indices = list(range(time_steps, data_len))
-    test_len = len(target_indices) * 2 // 10
-
-    # random.seed(0)
-    random.shuffle(target_indices)
-
-    train_targets = sorted(target_indices[:-test_len])
-    test_targets = sorted(target_indices[-test_len:])
-
-    train_indices = []
-    test_indices = []
-
-    for i in range(len(train_targets)):
-        for j in range(train_targets[i] - time_steps, train_targets[i] + 1):
-            if j not in train_indices:
-                train_indices.append(j)
-    
-    for i in range(len(test_targets)):
-        for j in range(test_targets[i] - time_steps, test_targets[i] + 1):
-            if j not in test_indices:
-                test_indices.append(j)
-
-    train_indices = sorted(train_indices)
-    test_indices = sorted(test_indices)
-
-    train_set = data.loc[train_indices]
-    test_set = data.loc[test_indices]
-
-    return train_set, test_set, train_targets, test_targets, train_indices, test_indices, final_window
+    test_len = len(data) * 2 // 10
+    train, test = data[:-test_len], data[-test_len - time_steps:]
+    return train, test
 
 
-def transform_data(train, test, final_window):
+def transform_data(train, test):
     """Applies Yeo-Johnson transformation to train and test datasets. 
     Each column or feature in the dataset is standardized separately.
 
@@ -1060,7 +952,6 @@ def transform_data(train, test, final_window):
     # Apply Yeo-Johnson Transform
     train = scaler.fit_transform(train)
     test = scaler.transform(test)
-    final_window = scaler.transform(final_window)
 
     # scale down outliers in train and test data
     for row in range(train.shape[0]):
@@ -1077,19 +968,11 @@ def transform_data(train, test, final_window):
             elif test[row, col] < -4.5:
                 test[row, col] = -4.5
 
-    for row in range(final_window.shape[0]):
-        for col in range(col_num):
-            if final_window[row, col] > 4.5:
-                final_window[row, col] = 4.5
-            elif final_window[row, col] < -4.5:
-                final_window[row, col] = -4.5
-
     # reconvert to dataframes
     train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
     test = pd.DataFrame({col: test[:, i] for i, col in enumerate(col_names)})
-    final_window = pd.DataFrame({col: final_window[:, i] for i, col in enumerate(col_names)})
 
-    return scaler, train, test, final_window, col_names
+    return scaler, train, test, col_names
 
 
 def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
@@ -1113,7 +996,7 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col=None):
+def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None, time_steps=1):
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1142,24 +1025,20 @@ def data_processing(technical_data, fundamental_data, sentimental_data, time_ste
     # raise exception if missing/null value is found in the combined dataset
     if data.isnull().values.any():
         raise Exception(f'Null value found in combined dataset.')
-
-    # print(data)
     
     #scale data
     scaled_data, linear_scaler = scale_data(data)
 
     #split data into train and test
-    train, test, train_targets, test_targets, train_indices, test_indices, final_window = train_test_split(scaled_data, time_steps)
+    train, test = train_test_split(scaled_data, time_steps)
     
     #apply Yeo-Johnson Power Transfrom
-    scaler, train, test, final_window, col_names = transform_data(train, test, final_window)
+    scaler, train, test, col_names = transform_data(train, test)
 
-    return scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices, final_window
-
-
+    return linear_scaler, scaler, train, test, col_names
 
 
-def make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps=1):
+def make_data_window(train, test, time_steps=1):
     """Creates data windows for the train and test datasets.
     Splits train and test datasets into train_x, train_y, test_x,
     and test_y datasets. The _x datasets represent model input datasets
@@ -1185,50 +1064,38 @@ def make_data_window(train, test, train_targets, test_targets, train_indices, te
     train = train.to_numpy()
     test = test.to_numpy()
 
+    train_len = train.shape[0]
+    test_len = test.shape[0]
+
     # x values: the input data window
     # y values: actual future values to be predicted from data window
     train_x, train_y, test_x, test_y = [], [], [], []
 
-    for index, row in enumerate(train_indices):
-        if row in train_targets:
-            train_x.append([train[j, :] for j in range(index - time_steps, index)])
-            train_y.append([train[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
+    for i in range(train_len):
 
-    for index, row in enumerate(test_indices):
-        if row in test_targets:
-            test_x.append([test[j, :] for j in range(index - time_steps, index)])
-            test_y.append([test[j, stock_returns_index] for j in range(index - time_steps + 1, index + 1)])
+        if (i + time_steps) < train_len:
+            train_x.append([train[j, :] for j in range(i, i + time_steps)])
+            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+            
+    for i in range(test_len):
+        
+        if (i + time_steps) < test_len:
+            test_x.append([test[j, :] for j in range(i, i + time_steps)])
+            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+
 
     train_x = np.array(train_x)
     train_y = np.array(train_y)
     test_x = np.array(test_x)
     test_y = np.array(test_y)
 
-    shuffled_train_indices = list(range(train_x.shape[0]))
-    # random.seed(0)
-    random.shuffle(shuffled_train_indices)
-
-    shuffled_train_x = np.array([train_x[i] for i in shuffled_train_indices])
-    shuffled_train_y = np.array([train_y[i] for i in shuffled_train_indices])
-
-    return shuffled_train_x, shuffled_train_y, test_x, test_y
+    return train_x, train_y, test_x, test_y
 #data_processing END
 
 
 def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     if date_range == None:
         date_range = get_dates_five_years(testing=True)
-
-    # get sentimental data
-    # has its own database (sentiment data folder) and is handled within the function itself
-    sentimental_data = get_sentimental_data(stock_ticker, date_range)
-
-    if os.path.exists("best sentiment model"):
-        shutil.rmtree("best sentiment model")
-
-    # for when user did not continue with News API historical call, will instead input new stock ticker
-    if sentimental_data is None:
-        return None, None, None, None, None, None, None
 
     os.chdir('data')
 
@@ -1261,23 +1128,114 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     stock_database.close()
     os.chdir('..')
 
-    scaler, train, test, col_names, train_targets, test_targets, train_indices, test_indices, final_window = data_processing(technical_data, fundamental_data, sentimental_data, time_steps, drop_col)
-    train_x, train_y, test_x, test_y = make_data_window(train, test, train_targets, test_targets, train_indices, test_indices, time_steps)
+    # get sentimental data
+    # has its own database (sentiment data folder) and is handled within the function itself
+    sentimental_data = get_sentimental_data(stock_ticker, date_range)
+
+    linear_scaler, scaler, train, test, col_names = data_processing(technical_data, fundamental_data, sentimental_data, drop_col, time_steps)
+    train_x, train_y, test_x, test_y = make_data_window(train, test, time_steps)
+
+    return linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y
+
+
+
+def get_final_window(stock_ticker, date_range=None, time_steps=1, drop_col=None):
+
+    if date_range == None:
+        date_range = get_dates_five_years(testing=True)
+
+    os.chdir('data')
+
+    # reset database if it gets too large (current max size = 20 MB)
+    if os.path.exists('stock_database.dat') and os.path.getsize('stock_database.dat') > 20000000:
+        os.remove('stock_database.bak')
+        os.remove('stock_database.dat')
+        os.remove('stock_database.dir')
+
+    # open stock_database to see if data was already collected from API
+    # otherwise, get data from API and store it in database
+    stock_database = shelve.open('stock_database')
+    stock_database_key = f"{stock_ticker} {date_range}"
+
+    if stock_database_key in stock_database:
+        technical_data = stock_database[stock_database_key]['technical_data']
+        fundamental_data = stock_database[stock_database_key]['fundamental_data']
+
+    else:
+        os.chdir('..')
+        technical_data = get_technical_data(stock_ticker, date_range)
+        fundamental_data = get_fundamental_data(stock_ticker, date_range)
+        os.chdir('data')
+
+        stock_database[stock_database_key] = {
+            'technical_data' : technical_data,
+            'fundamental_data' : fundamental_data
+        }
+        
+    stock_database.close()
+    os.chdir('..')
+
+    # get sentimental data
+    # has its own database (sentiment data folder) and is handled within the function itself
+    sentimental_data = get_sentimental_data(stock_ticker, date_range)  
+
+    data = technical_data.join(fundamental_data.set_index('date'), on='date')
+    data = data.join(sentimental_data.set_index('date'), on='date')
+    data.dropna(inplace=True)
+    data.reset_index(drop=True, inplace=True)
+
+    #remove date column
+    data.drop(columns='date', inplace=True)
+
+    if drop_col is not None:
+        data.drop(columns=drop_col, inplace=True)
+
+    # raise exception if missing/null value is found in the combined dataset
+    if data.isnull().values.any():
+        raise Exception(f'Null value found in combined dataset.')
+
+    final_window = data.tail(time_steps)
 
     final_window = final_window.to_numpy()
     final_window = np.reshape(final_window, [1, final_window.shape[0], final_window.shape[1]])
 
-    return scaler, col_names, train_x, train_y, test_x, test_y, final_window
+    return final_window
+
+
+
+def scale_transform_window(window, linear_scaler, scaler, col_names):
+
+    window = np.reshape(window.copy(), window.shape[1:])
+
+    for row in window:
+        for index, val in enumerate(row):
+            scale_factor = linear_scaler[index]
+            row[index] = float(Decimal(val) / Decimal(10 ** (scale_factor)))
+
+    window = pd.DataFrame(window, columns=col_names)
+    window = scaler.transform(window)
+
+    for row in range(window.shape[0]):
+        for col in range(window.shape[1]):
+            if window[row, col] > 4.5:
+                window[row, col] = 4.5
+            elif window[row, col] < -4.5:
+                window[row, col] = -4.5
+
+    window = np.reshape(window, [1, window.shape[0], window.shape[1]])
+    return window
 
 
 def main():
-    stock_ticker = 'TEL'
-    scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(testing=True), time_steps=10, drop_col=['psei_returns'])
+    stock_ticker = 'AP'
+    linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=20, drop_col=None)
+    final_window = get_final_window(stock_ticker, date_range=None, time_steps=20, drop_col=None)
 
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
-    print(col_names)
-    print(train_y.shape)
-    print(test_y.shape)
+    
+    final_window = scale_transform_window(final_window, linear_scaler, scaler, col_names)
+    print(final_window)
+
     sys.exit()
 
     print(train_x.shape)
@@ -1287,9 +1245,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-    # with open('keys/EOD_API_key.txt') as file:
-    #     token = file.readline()
-    # trading_days = get_trading_dates('TEL', get_dates_five_years(), token).iloc[-1]
-
-    # print(type(trading_days))
+    # print(get_final_window('AP', date_range=None, time_steps=20).shape)
