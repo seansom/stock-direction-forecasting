@@ -1,13 +1,15 @@
+from tkinter.messagebox import NO
+from turtle import update
 from tensorflow import keras, compat
 from statistics import mean, stdev
+import keras_tuner as kt
 import numpy as np
 import pandas as pd
-import os, sys, math, copy, shutil, shelve, warnings, json, datetime, ctypes
+import os, sys, math, copy, shutil, shelve, warnings, json
 from sklearn.preprocessing import PowerTransformer
-from data_processing_new import get_dataset, get_dates_five_years, get_trading_dates, get_transformed_final_window
-from direction_forecasting_new import get_optimal_hps, experiment, make_model_forecast
+from data_processing_app import get_dataset, inverse_transform_data, get_dates_five_years, get_trading_dates
+from direction_forecasting_app import CustomCallback, make_lstm_hypermodel, get_optimal_hps, make_lstm_model, forecast_lstm_model, get_lstm_model_perf, print_model_performance, experiment
 from PyQt5 import QtWidgets as qtw
-from PyQt5 import QtGui
 from PyQt5.QtCore import QThread
 from mainwindow import Ui_MainWindow
 
@@ -66,11 +68,6 @@ class MainWindow(qtw.QMainWindow):
         self.ui.tune_model_button.clicked.connect(self.run_tuning_thread)
 
 
-        self.setWindowIcon(QtGui.QIcon('stonks_project_icon.png'))
-        appid = 'CoE/EcE 199 Capstone Project - Sombrito, Gonzales, Nolasco'
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
-
-
     def disable_ui(self):
         self.ui.stock_ticker_line_edit1.setEnabled(False)
         self.ui.predict_button.setEnabled(False)
@@ -89,162 +86,47 @@ class MainWindow(qtw.QMainWindow):
         self.ui.tune_model_button.setEnabled(True)
 
 
-    def clear_predictions_ui(self):
-
-        repeats = 5
-
-        self.ui.models_progress_label.setText(f'0 / {repeats}')
-        self.ui.train_progress_label.setText('0 %')
-        self.ui.prediction_progress_label.setText('0 %')
-
-        self.ui.last_tuning_date_label1.setText('-')
-        self.ui.mean_da_label.setText('-')
-        self.ui.mean_uda_label.setText('-')
-        self.ui.mean_dda_label.setText('-')
-        self.ui.stdev_da_label.setText('-')
-        self.ui.stdev_uda_label.setText('-')
-        self.ui.stdev_dda_label.setText('-')
-
-        self.ui.result_stock_ticker_label.setText('-')
-        self.ui.result_last_trading_day_label.setText('-')
-        self.ui.result_prediction_label.setText('-')
-
-
-    def get_params(self, stock_ticker):
+    def get_hps(self, stock_ticker):
 
         os.chdir('data')
 
-        params_database = shelve.open('params_database')
-        params_database_key = f"{stock_ticker}"
+        hps_database = shelve.open('hps_database')
+        hps_database_key = f"{stock_ticker}"
 
-        if params_database_key in params_database:
-            params = params_database[params_database_key]
+        if hps_database_key in hps_database:
+            hps = hps_database[hps_database_key]
 
         else:
-            params = {
-                'time_steps': 1,
-                'hps': {
-                    'layers': 3,
-                    'units': 64,
-                    'dropout': 0.6
-                },
-                'dropped_features': None,
-                'last_model_tuning_date': 'Never'
-            }
+            hps = None
 
-        params_database.close()
+        hps_database.close()
         os.chdir('..')
 
-        return params
+        return hps
 
 
-    def get_model_info(self, stock_ticker, last_model_tuning_date):
+    def get_built_models(self, stock_ticker, last_model_tuning_date):
 
         os.chdir('data')
 
-        model_info_database = shelve.open('model_info_database')
-        model_info_database_key = f"{stock_ticker}"
+        model_database = shelve.open('model_database')
+        model_database_key = f"{stock_ticker}"
 
-        if model_info_database_key in model_info_database and last_model_tuning_date in [model_info_database[model_info_database_key]['training_date'], 'Never']:
-            model_info = model_info_database[model_info_database_key]
+        if model_database_key in model_database and (last_model_tuning_date == 'Never' or model_database[model_database_key]['training_date'] == last_model_tuning_date):
+            models = model_database[model_database_key]
 
         else:
-            model_info = None
+            models = {}
 
-        model_info_database.close()
+        model_database.close()
         os.chdir('..')
 
-        return model_info
-
-
-    def make_models(self, stock_ticker, params):
-
-        time_steps = params['time_steps']
-        hps = params['hps']
-        dropped_features = params['dropped_features']
-        last_model_tuning_date = params['last_model_tuning_date']
-
-        if last_model_tuning_date != 'Never':
-            date_five_years_ago = datetime.datetime.strptime(last_model_tuning_date, '%Y-%m-%d') - datetime.timedelta(days=round(365.25 * 5))
-            date_range = (date_five_years_ago, last_model_tuning_date)
-        
-        else:
-            date_range = ('2017-04-13', '2022-04-13')
-
-        performances = []
-        repeats = 5
-
-        self.ui.models_progress_label.setText(f'0 / {repeats}')
-        print("===================================================")
-        for i in range(repeats):
-            print(f"Experiment {i + 1} / {repeats}")
-
-            self.ui.status_label1.setText(f'Building {stock_ticker} model {i + 1}...')
-            self.ui.status_label2.setText(f'Building {stock_ticker} model {i + 1}...')
-            perf, model, linear_scaler, scaler, col_names = experiment(stock_ticker, time_steps, date_range=date_range, drop_col=dropped_features, hps=hps, window=self)
-
-            performances.append(perf)
-
-            self.ui.status_label1.setText(f'Saving {stock_ticker} model {i + 1}...')
-            self.ui.status_label2.setText(f'Saving {stock_ticker} model {i + 1}...')
-            os.chdir('models')
-            model.save(f'{stock_ticker} model {i + 1}', overwrite=True)
-            os.chdir('..')
-
-
-            print("===================================================")
-            self.ui.models_progress_label.setText(f'{i + 1} / {repeats}')
-
-
-
-        mean_da = round(mean([perf['da'] for perf in performances]), 6)
-        mean_uda = round(mean([perf['uda'] for perf in performances]), 6)
-        mean_dda = round(mean([perf['dda'] for perf in performances]), 6)
-
-        std_da = round(stdev([perf['da'] for perf in performances]), 6)
-        std_uda = round(stdev([perf['uda'] for perf in performances]), 6)
-        std_dda = round(stdev([perf['dda'] for perf in performances]), 6)
-
-        total_ups = performances[0]['total_ups']
-        total_downs = performances[0]['total_downs']
-        
-        optimistic_baseline = round(total_ups / (total_ups + total_downs), 6)
-        pessimistic_baseline = round(1 - optimistic_baseline, 6)
-
-
-        os.chdir('data')
-
-        model_info_database = shelve.open('model_info_database')
-        model_info_database_key = f"{stock_ticker}"
-
-        model_info_database[model_info_database_key] = {
-            'linear_scaler': linear_scaler,
-            'scaler': scaler,
-            'col_names': col_names,
-            'training_date': date_range[1],
-            'mean_da': mean_da,
-            'mean_uda': mean_uda,
-            'mean_dda': mean_dda,
-            'std_da': std_da,
-            'std_uda': std_uda,
-            'std_dda': std_dda,
-            'total_ups': total_ups,
-            'total_downs': total_downs,
-            'optimistic_baseline': optimistic_baseline,
-            'pessimistic_baseline': pessimistic_baseline
-        }
-
-        model_info_database.close()
-        os.chdir('..')
-        return
+        return models
 
 
     def make_prediction(self):
 
-        repeats = 5
-
         self.disable_ui()
-        self.clear_predictions_ui()
 
         try:
             stock_ticker = self.ui.stock_ticker_line_edit1.text()
@@ -258,46 +140,120 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
+            self.ui.status_label1.setText('Please check console for possible confirmation')
+            self.ui.status_label2.setText('Please check console for possible confirmation')
+
+            repeats = 5
             performances = []
             final_predictions = []
 
-            self.ui.status_label1.setText(f'Getting {stock_ticker} model parameters...')
-            self.ui.status_label2.setText(f'Getting {stock_ticker} model parameters...')
+            hps = self.get_hps(stock_ticker)
+            time_steps = hps['time_steps'] if hps is not None else 20
 
-            params = self.get_params(stock_ticker)
+            last_model_tuning_date = hps['last_model_tuning_date'] if hps is not None else 'Never'
 
-            time_steps = params['time_steps']
-            hps = params['hps']
-            dropped_features = params['dropped_features']
-            last_model_tuning_date = params['last_model_tuning_date']
+            models = self.get_built_models(stock_ticker, last_model_tuning_date)
+
+            if not models:
+
+                print("===================================================")
+                for i in range(repeats):
+                    print(f"Experiment {i + 1} / {repeats}")
+                    
+                    scaler, col_names, train_x, train_y, test_x, test_y, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(init_date=last_model_tuning_date), time_steps=time_steps, drop_col=None)
+                    
+                    # for when user did not continue with News API historical call, will instead input new stock ticker
+                    if scaler is None and col_names is None:
+                        self.ui.status_label1.setText('Idle - Please input new stock ticker')
+                        self.ui.status_label2.setText('Idle - Please input new stock ticker')
+                        self.enable_ui()
+                        return
+
+                    self.ui.status_label1.setText(f'Forecasting {stock_ticker} stock...')
+                    self.ui.status_label2.setText(f'Forecasting {stock_ticker} stock...')
+                    
+                    model, perf, _, _, final_prediction = experiment(scaler, col_names, train_x, train_y, test_x, test_y, final_window, hps=hps, window=self)
+                    performances.append(perf)
+                    final_predictions.append(final_prediction)
 
 
-            self.ui.status_label1.setText(f'Checking for {stock_ticker} models...')
-            self.ui.status_label2.setText(f'Checking for {stock_ticker} models...')
+                    os.chdir('data')
+                    model_database = shelve.open('model_database')
+                    model_database_key = f"{stock_ticker}"
 
-            model_info = self.get_model_info(stock_ticker, last_model_tuning_date)
-            if model_info is None:
-                self.make_models(stock_ticker, params)
-                model_info = self.get_model_info(stock_ticker, last_model_tuning_date)
+                    if model_database_key not in model_database:
+                        model_database[model_database_key] = {}
+
+                    model_database[model_database_key][f'model {i}'] = model
+                    model_database[model_database_key][f'scaler {i}'] = scaler
+
+                    model_database.close()
+                    os.chdir('..')
+
+                    print("===================================================")
+                    self.ui.models_progress_label.setText(f'{i + 1} / {repeats}')
+
+
+                mean_da = round(mean([perf['da'] for perf in performances]), 6)
+                mean_uda = round(mean([perf['uda'] for perf in performances]), 6)
+                mean_dda = round(mean([perf['dda'] for perf in performances]), 6)
+
+                std_da = round(stdev([perf['da'] for perf in performances]), 6)
+                std_uda = round(stdev([perf['uda'] for perf in performances]), 6)
+                std_dda = round(stdev([perf['dda'] for perf in performances]), 6)
+
+                mean_total_ups = mean([perf['total_ups'] for perf in performances])
+                mean_total_downs = mean([perf['total_downs'] for perf in performances])
+                
+                optimistic_baseline = round(mean_total_ups / (mean_total_ups + mean_total_downs), 6)
+                pessimistic_baseline = round(1 - optimistic_baseline, 6)
+                
+                os.chdir('data')
+                model_database = shelve.open('model_database')
+                model_database_key = f"{stock_ticker}"
+
+                training_date = get_dates_five_years(init_date=last_model_tuning_date)[1]
+                model_database[model_database_key]['training_date'] = training_date
+
+                model_database[model_database_key]['mean_da'] = mean_da
+                model_database[model_database_key]['mean_uda'] = mean_uda
+                model_database[model_database_key]['mean_da'] = mean_da
+                model_database[model_database_key]['std_da'] = std_da
+                model_database[model_database_key]['std_uda'] = std_uda
+                model_database[model_database_key]['std_dda'] = std_dda
+                model_database[model_database_key]['optimistic_baseline'] = optimistic_baseline
+                model_database[model_database_key]['pessimistic_baseline'] = pessimistic_baseline
+
+                model_database.close()
+                os.chdir('..')
+
 
             else:
-                self.ui.train_progress_label.setText('100.0 %')
-                self.ui.prediction_progress_label.setText('100.0 %')
-                self.ui.models_progress_label.setText(f'{repeats} / {repeats}')
+                print("===================================================")
+                for i in range(repeats):
+                    print(f"Experiment {i + 1} / {repeats}")
+                    
+                    scaler, _, _, _, _, _, final_window = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=time_steps, drop_col=None)
 
-            mean_da = model_info['mean_da']
-            mean_uda = model_info['mean_uda']
-            mean_dda = model_info['mean_dda']
+                    final_window = scaler.inverse_transform(np.reshape(final_window, final_window.shape[1:]))
 
-            std_da = model_info['std_da']
-            std_uda = model_info['std_uda']
-            std_dda = model_info['std_dda']
+                    os.chdir('data')
+                    model_database = shelve.open('model_database')
+                    model_database_key = f"{stock_ticker}"
 
-            total_ups = model_info['total_ups']
-            total_downs = model_info['total_downs']
+                    model = model_database[model_database_key][f'model {i}']
+                    scaler = model_database[model_database_key][f'scaler {i}']
 
-            optimistic_baseline = model_info['optimistic_baseline']
-            pessimistic_baseline = model_info['pessimistic_baseline']
+                    model_database.close()
+                    os.chdir('..')
+
+                    final_window = np.reshape(scaler.transform(final_window), [1, final_window.shape[0], final_window.shape[1]])
+
+                    final_prediction = forecast_lstm_model(model, final_window)
+                    final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="log_return")
+                    final_prediction = [i.tolist() for i in final_prediction]
+
+
 
             self.ui.last_tuning_date_label1.setText(last_model_tuning_date)
             self.ui.mean_da_label.setText(str(mean_da))
@@ -309,45 +265,23 @@ class MainWindow(qtw.QMainWindow):
 
             self.ui.result_stock_ticker_label.setText(stock_ticker)
 
-            forecasts = []
+            with open('keys/EOD_API_key.txt') as file:
+                token = file.readline()
+            last_observed_trading_day = get_trading_dates(stock_ticker, get_dates_five_years(), token).iloc[-1]
+            self.ui.result_last_trading_day_label.setText(last_observed_trading_day)
 
-            for i in range(repeats):
+            upward_predictions = [prediction[0] for prediction in final_predictions if prediction[0] >= 0]
+            downward_predictions = [prediction[0] for prediction in final_predictions if prediction[0] < 0]
+            majority_prediction = 'Upward' if len(upward_predictions) >= len(downward_predictions) else 'Downward'
 
-                self.ui.status_label1.setText(f'Forecasting {stock_ticker} ({i + 1} / {repeats})...')
-                self.ui.status_label2.setText(f'Forecasting {stock_ticker} ({i + 1} / {repeats})...')
-
-                os.chdir('models')
-                model = keras.models.load_model(f'{stock_ticker} model {i + 1}')
-                os.chdir('..')
-
-                model_dict = {
-                    'model': model,
-                    'linear_scaler': model_info['linear_scaler'],
-                    'scaler': model_info['scaler'],
-                    'col_names': model_info['col_names'],
-                    'params': params
-                }
-
-                if i == 0:
-                    final_window, last_observed_trading_day = get_transformed_final_window(stock_ticker, model_dict)
-                    self.ui.result_last_trading_day_label.setText(last_observed_trading_day)
-
-                forecast = make_model_forecast(model_dict, final_window)
-                forecasts.append(forecast)
-
-            majority_prediction = 'Upward' if sum(forecasts) > len(forecasts) / 2 else 'Downward'
             self.ui.result_prediction_label.setText(majority_prediction)
 
-
-            print()
-            print("===================================================")
-            
             print(f'Stock: {stock_ticker}')
 
             print()
-
-            print(f'Total Ups: {total_ups}')
-            print(f'Total Downs: {total_downs}')
+            
+            print(f'Total Ups: {performances[0]["total_ups"]}')
+            print(f'Total Downs: {performances[0]["total_downs"]}')
 
             print()
 
@@ -367,16 +301,10 @@ class MainWindow(qtw.QMainWindow):
             print(f"Optimistic Baseline DA: {optimistic_baseline}")
             print(f"Pessimistic Baseline DA: {pessimistic_baseline}")
 
-            print()
+            print(f'Final Predictions: {final_predictions}')
 
-            print(f'Direction Forecasts: {forecasts}')
-            print(f'Majority Forecast: {majority_prediction}')
-            
-            print("===================================================")
-
-
-            self.ui.status_label1.setText('Idle')
-            self.ui.status_label2.setText('Idle')
+            self.ui.status_label1.setText('Idle - Done forecasting')
+            self.ui.status_label2.setText('Idle - Done forecasting')
             self.enable_ui()
 
         except json.decoder.JSONDecodeError:

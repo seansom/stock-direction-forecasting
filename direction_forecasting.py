@@ -1,25 +1,27 @@
-# random split with shuffling
 from tensorflow import keras, compat
 from statistics import mean, stdev
-import keras_tuner as kt
 import numpy as np
 import pandas as pd
-import os, sys, math, copy, shutil
-from sklearn.preprocessing import PowerTransformer
-from data_processing import get_dataset, inverse_transform_data
+import keras_tuner as kt
+import os, sys, math, warnings, shutil
+from data_processing import get_dates_five_years, get_trading_dates, get_dataset, inverse_transform_data, get_transformed_final_window
 
 
 class CustomCallback(keras.callbacks.Callback):
     """A callback class used to print the progress of model fitting
     after each epoch.
     """	
-    def __init__(self, epochs):
+    def __init__(self, epochs, window=None):
         self.epochs = epochs
+        self.window = window
 
     def on_epoch_end(self, epoch, logs=None):
         curr_progress = round(((epoch + 1) / self.epochs) * 100, 2)
         print(f'Training Progress: {curr_progress} %', end='\r')
-
+        
+        if self.window is not None:
+            self.window.ui.train_progress_label.setText(f'{curr_progress} %')
+    
     def on_train_end(self, logs=None):
         print()
 
@@ -35,8 +37,7 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
     # create lstm hypermodel
     for _ in range(layers):
-        lstm_hypermodel.add(keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True,
-                                              recurrent_dropout=dropout))
+        lstm_hypermodel.add((keras.layers.LSTM(units=units, input_shape=(time_steps, features), return_sequences=True, recurrent_dropout=dropout)))
     lstm_hypermodel.add(keras.layers.Dense(units=1, activation="linear"))
 
     lstm_hypermodel.compile(loss='mean_squared_error', optimizer='adam')
@@ -57,7 +58,7 @@ def get_optimal_hps(train_x, train_y):
 
     # if overwrite is false, previously-saved computed hps will be used
     tuner = kt.Hyperband(hypermodel_builder, objective='val_loss', max_epochs=100, factor=3, overwrite=True)
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
 
     # execute Hyperband search of optimal hyperparameters
     tuner.search(train_x, train_y, validation_split=0.25, callbacks=[early_stopping_callback])
@@ -71,12 +72,12 @@ def get_optimal_hps(train_x, train_y):
     return hps
 
 
-def make_lstm_model(train_x, train_y, epochs=100, hps=None):
+def make_lstm_model(train_x, train_y, epochs=100, hps=None, window=None):
 
     if hps is None:
         layers = 3
         units = 64
-        dropout = 0.2
+        dropout = 0.6
     else:
         layers = hps['layers']
         units = hps['units']
@@ -85,19 +86,19 @@ def make_lstm_model(train_x, train_y, epochs=100, hps=None):
     lstm_model = keras.models.Sequential()
 
     for _ in range(layers):
-        lstm_model.add(keras.layers.LSTM(units=units, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout))
+        lstm_model.add((keras.layers.LSTM(units=units, input_shape=train_x.shape[1:], return_sequences=True, recurrent_dropout=dropout)))
     lstm_model.add(keras.layers.Dense(units=1, activation='linear'))
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min')
-    print_train_progress_callback = CustomCallback(epochs)
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, mode='min')
+    print_train_progress_callback = CustomCallback(epochs, window)
 
     lstm_model.compile(loss='mean_squared_error', optimizer='adam')
-    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25,  verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
+    lstm_model.fit(train_x, train_y, epochs=epochs, validation_split=0.25, verbose=0, callbacks=[early_stopping_callback, print_train_progress_callback])
 
     return lstm_model
 
 
-def forecast_lstm_model(model, test_x):
+def forecast_lstm_model(model, test_x, window=None):
     """Forecasts future values using a model and test input dataset.
 
     Args:
@@ -117,6 +118,9 @@ def forecast_lstm_model(model, test_x):
     for i in range(test_len):
         curr_progress = round(((i + 1) / test_len) * 100, 2)
         print(f'Prediction Progress: {curr_progress} %', end='\r')
+
+        if window is not None:
+            window.ui.prediction_progress_label.setText(f'{curr_progress} %')
 
         model_input = (test_x[i, :, :]).reshape(1, test_timesteps, test_features)
         prediction = model.predict(model_input)
@@ -184,42 +188,234 @@ def print_model_performance(perf):
     print("===================================================")
 
 
-def experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=None):
+def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on_val=False, hps=None, window=None):
+    """Function that creates and evaluates a single model.
+    Returns the performance metrics of the created model.
 
-    train_x_copy = copy.deepcopy(train_x)
-    train_y_copy = copy.deepcopy(train_y)
-    test_x_copy = copy.deepcopy(test_x)
-    test_y_copy = copy.deepcopy(test_y)
+    Args:
+        stock_ticker (string): The target stock to be predicted.
+        time_steps (int): The number of timesteps in the data window inputs.
+        epochs (int): The maximum number of training epochs.
+
+    Returns:
+        dict: A dictionary of the performance metrics of the created model.
+    """
+
+    linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=drop_col)
+
+    if test_on_val:
+        test_len = train_x.shape[0] * 25 // 100
+        test_x = train_x[-test_len:]
+        test_y = train_y[-test_len:]
 
     # create, compile, and fit an lstm model
-    lstm_model = make_lstm_model(train_x_copy, train_y_copy, epochs=100, hps=hps)
+    lstm_model = make_lstm_model(train_x, train_y, epochs=100, hps=hps, window=window)
+
+    if window is not None:
+        window.ui.train_progress_label.setText('100.0 %')
 
     # get the model predictions
-    predictions = forecast_lstm_model(lstm_model, test_x_copy)
+    predictions = forecast_lstm_model(lstm_model, test_x, window=window)
 
     # test_y has the shape of (samples, timesteps). Only the last timestep is the forecast target
-    test_y_copy = np.array([test_y_copy[i, -1] for i in range(len(test_y_copy))])
+    test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
 
     # revert the normalization scalings done
-    test_y_copy = inverse_transform_data(test_y_copy, scaler, col_names, feature="log_return")
+    test_y = inverse_transform_data(test_y, scaler, col_names, feature="log_return")
     predictions = inverse_transform_data(predictions, scaler, col_names, feature="log_return")
 
     # get model performance statistics
-    perf = get_lstm_model_perf(predictions, test_y_copy)
+    perf = get_lstm_model_perf(predictions, test_y)
 
-    return perf, test_y_copy, predictions
+    return perf, lstm_model, linear_scaler, scaler, col_names
+
+
+
+
+
+def make_model_forecast(model_dict, final_window):
+
+    model = model_dict['model']
+    scaler = model_dict['scaler']
+    col_names = model_dict['col_names']
+
+    final_prediction = forecast_lstm_model(model, final_window)
+    final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="log_return")
+
+    final_prediction = [i.tolist() for i in final_prediction][0]
+    final_prediction = 1 if final_prediction >= 0 else 0
+
+    return final_prediction
+
+
+
+
+
+def feature_selection(stock_ticker, timesteps, date_range=None, repeats=20, hps=None):
+    
+    features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    num_features = len(features)
+    dropped_features = features.copy()
+
+    print("===================================================")
+    print("Starting Feature Selection...")
+    print(f"Features Tested: 0/{num_features} (current: None)")
+    
+
+    model_perfs = []
+    for _ in range(repeats):
+        curr_model_perf, _, _, _, _ = experiment(stock_ticker, timesteps, date_range=date_range, drop_col=dropped_features, test_on_val=True, hps=hps)
+        model_perfs.append(curr_model_perf['da'])
+
+    curr_best_da = mean(model_perfs)
+    
+    print(f"Current Mean Directional Accuracy: {round(curr_best_da, 6)}")
+    print(f"Dropped Features: {dropped_features}")
+    print("===================================================")
+
+
+    for index, feature in enumerate(features):
+
+        model_perfs = []
+        dropped_features.remove(feature)
+
+        print(f"Features Tested: {index + 1}/{num_features} (current features: {[feature for feature in features if feature not in dropped_features]})")
+
+        for _ in range(repeats):
+            curr_model_perf, _, _, _, _ = experiment(stock_ticker, timesteps, date_range=date_range, drop_col=dropped_features, test_on_val=True, hps=hps)
+            model_perfs.append(curr_model_perf['da'])
+
+        curr_da = mean(model_perfs)
+
+        if curr_da > curr_best_da:
+            curr_best_da = curr_da
+        else:
+            dropped_features.append(feature)
+
+        print(f"Best Mean Directional Accuracy: {round(curr_best_da, 6)}")
+        print(f"Current Mean Directional Accuracy: {round(curr_da, 6)}")
+        
+        print(f"Dropped Features: {dropped_features}")
+        print("===================================================")
+
+    return dropped_features
+
+
+def get_params(stock_ticker, date_range=None):
+
+    time_steps_list = [10, 15]
+    dropped_features = []
+
+    for step in time_steps_list:
+        curr_dropped_features = feature_selection(stock_ticker, step, date_range=date_range, repeats=15, hps=None)
+        dropped_features.append(curr_dropped_features)
+
+    hps_list = []
+
+    for index, time_steps in enumerate(time_steps_list):
+        _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=dropped_features[index])
+        hps = get_optimal_hps(train_x, train_y)
+        hps_list.append(hps)
+
+
+    print(dropped_features)
+    print(hps_list)
+
+
+    repeats = 10
+    average_performances = [0] * len(time_steps_list)
+
+    for index in range(len(time_steps_list)):
+        print("===================================================")
+        performances = []
+
+        for i in range(repeats):
+            print(f"Experiment {i + 1} / {repeats}")
+            perf, _, _, _, _ = experiment(stock_ticker, time_steps_list[index], date_range=date_range, drop_col=dropped_features[index], hps=hps_list[index])
+            performances.append(perf)
+            print("===================================================")
+
+        mean_da = mean([perf['da'] for perf in performances])
+        mean_uda = mean([perf['uda'] for perf in performances])
+        mean_dda = mean([perf['dda'] for perf in performances])
+
+        std_da = stdev([perf['da'] for perf in performances])
+        std_uda = stdev([perf['uda'] for perf in performances])
+        std_dda = stdev([perf['dda'] for perf in performances])
+        
+        optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
+        pessimistic_baseline = 1 - optimistic_baseline
+
+        print(f'Stock: {stock_ticker}')
+
+        print()
+        
+        print(f'Total Ups: {performances[0]["total_ups"]}')
+        print(f'Total Downs: {performances[0]["total_downs"]}')
+
+        print()
+
+        # Print average accuracies of the built models
+        print(f"Mean DA: {round(mean_da, 6)}")
+        print(f"Mean UDA: {round(mean_uda, 6)}")
+        print(f"Mean DDA: {round(mean_dda, 6)}")
+
+        print()
+
+        print(f"Standard Dev. DA: {round(std_da, 6)}")
+        print(f"Standard Dev. UDA: {round(std_uda, 6)}")
+        print(f"Standard Dev. DDA: {round(std_dda, 6)}")
+
+        print()
+
+        print(f"Optimistic Baseline DA: {round(optimistic_baseline, 6)}")
+        print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
+
+        average_performances[index] = mean_da
+
+
+    print(dropped_features)
+    print(hps_list)
+
+
+    best_hps_index = average_performances.index(max(average_performances))
+
+    best_dropped_features = dropped_features[best_hps_index]
+    best_hps = hps_list[best_hps_index]
+    best_time_steps = time_steps_list[best_hps_index]
+
+    print('===========================')
+
+    for i in dropped_features:
+        print(i)
+
+    for i in hps_list:
+        print(i)
+
+    print('===========================')
+
+    return {
+        'dropped_features': best_dropped_features,
+        'hps': best_hps,
+        'time_steps': best_time_steps
+    }
+
 
 
 def main():
     # stock to be predicted
-    stock_ticker = 'JFC'
+    stock_ticker = 'PGOLD'
 
     # parameters of each model
-    time_steps = 20
-    hps = None
+    time_steps = 1
+
+    hps = {'units': 32, 'layers': 1, 'dropout': 0.30000000000000004, 'tuner/epochs': 4, 'tuner/initial_epoch': 0, 'tuner/bracket': 3, 'tuner/round': 0}
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 10
+
+    # dropped features
+    dropped_features = ['wr', 'cmf', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'psei_returns', 'sentiment']
 
     
     print("===================================================")
@@ -227,8 +423,7 @@ def main():
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
-        perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps)
+        perf, _, _, _, _ = experiment(stock_ticker, time_steps, date_range=None, drop_col=dropped_features, hps=hps)
         performances.append(perf)
         print("===================================================")
 
@@ -239,11 +434,8 @@ def main():
     std_da = stdev([perf['da'] for perf in performances])
     std_uda = stdev([perf['uda'] for perf in performances])
     std_dda = stdev([perf['dda'] for perf in performances])
-
-    mean_total_ups = mean([perf['total_ups'] for perf in performances])
-    mean_total_downs = mean([perf['total_downs'] for perf in performances])
     
-    optimistic_baseline = mean_total_ups / (mean_total_ups + mean_total_downs)
+    optimistic_baseline = performances[0]['total_ups'] / (performances[0]['total_ups'] + performances[0]['total_downs'])
     pessimistic_baseline = 1 - optimistic_baseline
 
     print(f'Stock: {stock_ticker}')
@@ -273,98 +465,49 @@ def main():
 
 
 
-def get_hps():
-    # stock to be predicted
-    stock_ticker = 'BPI'
+def test_forecast():
+    stock_ticker = 'JFC'
 
-    # parameters of each model
-    time_steps_list = [1, 5, 10]
+    time_steps = 1
+    hps = None
+    dropped_features = None
 
-    hps_list = []
+    perf, model, linear_scaler, scaler, col_names = experiment(stock_ticker, time_steps, date_range=None, drop_col=dropped_features, hps=hps)
 
-    for time_steps in time_steps_list:
-        _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
-        hps = get_optimal_hps(train_x, train_y)
+    print(perf)
 
-        hps_list.append(hps)
+    params = {
+        'time_steps': time_steps,
+        'dropped_features': dropped_features
+    }
 
-    for i in hps_list:
-        print(i)
+    model_dict = {
+        'model': model,
+        'linear_scaler': linear_scaler,
+        'scaler': scaler,
+        'col_names': col_names,
+        'params': params
 
-    return hps_list
+    }
 
+    final_window, last_observed_trading_day = get_transformed_final_window(stock_ticker, model_dict)
 
-def batch_test(hps_list=None):
-    # stock to be predicted
-    stock_ticker = 'BPI'
+    for i in range(2):
+        print(make_model_forecast(model_dict, final_window))
 
-    repeats = 10
-
-    # parameters of each model
-    time_steps_list = [1, 5, 10]
-
-    if hps_list is None:
-        hps_list = [
-            {'units': 32, 'layers': 2, 'dropout': 0.5, 'tuner/epochs': 12, 'tuner/initial_epoch': 4, 'tuner/bracket': 3, 'tuner/round': 1, 'tuner/trial_id': 'f21b5fc16b5ae6fb9dec7d84c85edf3c'},
-            {'units': 64, 'layers': 4, 'dropout': 0.4, 'tuner/epochs': 100, 'tuner/initial_epoch': 0, 'tuner/bracket': 0, 'tuner/round': 0},
-            {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '5f9fce38199554b56f763489b9ee4823'},
-            {'units': 256, 'layers': 4, 'dropout': 0.1, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 2, 'tuner/round': 2, 'tuner/trial_id': '383b806f73b959f1f2c0e1af7e653d26'},
-            {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '30698f8a9d4cef06d6b783dba9734f78'}
-        ]
-
-    # hps_list = [
-    #     {'units': 256, 'layers': 2, 'dropout': 0.2, 'tuner/epochs': 100, 'tuner/initial_epoch': 34, 'tuner/bracket': 4, 'tuner/round': 4, 'tuner/trial_id': '6bdb16b6d5b090d7c064a083dc55f774'}
-    # ]
-
-    perfs = []
-
-    for i in range(len(time_steps_list)):
-
-        time_steps = time_steps_list[i]
-        hps = hps_list[i]
-
-        curr_performances = []
-
-        for _ in range(repeats):
-            scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=None, time_steps=time_steps, drop_col=None)
-            perf, _, _ = experiment(scaler, col_names, train_x, train_y, test_x, test_y, hps=hps)
-            curr_performances.append(perf)
-
-        mean_da = mean([perf['da'] for perf in curr_performances])
-        mean_uda = mean([perf['uda'] for perf in curr_performances])
-        mean_dda = mean([perf['dda'] for perf in curr_performances])
-
-        std_da = stdev([perf['da'] for perf in curr_performances])
-        std_uda = stdev([perf['uda'] for perf in curr_performances])
-        std_dda = stdev([perf['dda'] for perf in curr_performances])
-
-        mean_total_ups = mean([perf['total_ups'] for perf in curr_performances])
-        mean_total_downs = mean([perf['total_downs'] for perf in curr_performances])
-        
-        optimistic_baseline = mean_total_ups / (mean_total_ups + mean_total_downs)
-        pessimistic_baseline = 1 - optimistic_baseline
-
-        perfs.append((time_steps, {
-            'mean_da' : mean_da,
-            'mean_uda' : mean_uda,
-            'mean_dda' : mean_dda,
-            'std_da' : std_da,
-            'std_uda' : std_uda,
-            'std_dda' : std_dda,
-            'optimistic_baseline' : optimistic_baseline,
-            'pessimistic_baseline' : pessimistic_baseline,
-        }))
-
-    for i in perfs:
-        print(i)
-
-    for i in hps_list:
-        print(i)
 
 if __name__ == '__main__':
+
+    warnings.simplefilter('ignore')
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
-    hps_list = get_hps()
-    batch_test(hps_list)
+    main()
+
+    # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
+
+    # stock_ticker = 'PGOLD'
+    # params = get_params(stock_ticker)
+    # print(params)
+
+    # test_forecast()
