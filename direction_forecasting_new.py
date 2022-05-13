@@ -303,7 +303,7 @@ def feature_selection(stock_ticker, timesteps, date_range=None, repeats=20, hps=
 
 def get_params(stock_ticker, date_range=None):
 
-    time_steps_list = [1, 5, 10, 15, 20]
+    time_steps_list = [10, 15]
     dropped_features = []
 
     for step in time_steps_list:
@@ -404,18 +404,18 @@ def get_params(stock_ticker, date_range=None):
 
 def main():
     # stock to be predicted
-    stock_ticker = 'AP'
+    stock_ticker = 'PGOLD'
 
     # parameters of each model
     time_steps = 1
 
-    hps = None
+    hps = {'units': 32, 'layers': 1, 'dropout': 0.30000000000000004, 'tuner/epochs': 4, 'tuner/initial_epoch': 0, 'tuner/bracket': 3, 'tuner/round': 0}
 
     # how many models built (min = 2)
     repeats = 10
 
     # dropped features
-    dropped_features = None
+    dropped_features = ['wr', 'cmf', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'psei_returns', 'sentiment']
 
     
     print("===================================================")
@@ -423,7 +423,7 @@ def main():
 
     for i in range(repeats):
         print(f"Experiment {i + 1} / {repeats}")
-        perf, _, _, _, _ = experiment(stock_ticker, time_steps, date_range=date_range, drop_col=dropped_features, hps=hps)
+        perf, _, _, _, _ = experiment(stock_ticker, time_steps, date_range=None, drop_col=dropped_features, hps=hps)
         performances.append(perf)
         print("===================================================")
 
@@ -502,7 +502,7 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    # main()
+    main()
 
     # hps = {'units': 128, 'layers': 1, 'dropout': 0.0, 'tuner/epochs': 34, 'tuner/initial_epoch': 0, 'tuner/bracket': 1, 'tuner/round': 0}
 
@@ -510,5 +510,4 @@ if __name__ == '__main__':
     # params = get_params(stock_ticker)
     # print(params)
 
-
-    test_forecast()
+    # test_forecast()
