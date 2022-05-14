@@ -325,21 +325,6 @@ def transform_data(train, test):
     train = scaler.fit_transform(train)
     test = scaler.transform(test)
 
-    # scale down outliers in train and test data
-    for row in range(train.shape[0]):
-        for col in range(col_num):
-            if train[row, col] > 4.5:
-                train[row, col] = 4.5
-            elif train[row, col] < -4.5:
-                train[row, col] = -4.5
-
-    for row in range(test.shape[0]):
-        for col in range(col_num):
-            if test[row, col] > 4.5:
-                test[row, col] = 4.5
-            elif test[row, col] < -4.5:
-                test[row, col] = -4.5
-
     # reconvert to dataframes
     train = pd.DataFrame({col: train[:, i] for i, col in enumerate(col_names)})
     test = pd.DataFrame({col: test[:, i] for i, col in enumerate(col_names)})

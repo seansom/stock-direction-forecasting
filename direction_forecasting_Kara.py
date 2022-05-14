@@ -1,9 +1,13 @@
 # This version of the direction forecasting mode recreates the model from the study by Kara, Boyacioglu, and Baykan
 # Title: Predicting direction of stock price index movement using artificial neural networks and support vector machines: The sample of the Istanbul Stock Exchange
 
-# Model Type: ANN
-# Model Inputs: ['momentum', 'ad', 'wr', 'sma', 'wma', 'k_values', 'd_values', 'rsi', 'divergence', 'cci']
+# Model Type: ANN (stacked Dense layers with varying units and activation funcs)
+# Model Inputs: ['momentum', 'ad', 'wr', 'sma', 'wma', 'k_values', 'd_values', 'rsi', 'divergence' (macd), 'cci']
 # Model Outputs: stock_return as either 1 or 0 (upward or downard)
+# Loss: RMSE/MSE
+# Optimizer: SGD (0.1 learning rate, 0.7 momentum)
+# Epochs: 5000
+
 
 from tensorflow import keras, compat
 from statistics import mean, stdev
@@ -158,7 +162,7 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
         test_y = train_y[-test_len:]
 
     # create, compile, and fit an lstm model
-    ann_model = make_ann_model(train_x, train_y, epochs=5000)
+    ann_model = make_ann_model(train_x, train_y)
 
     # get the model predictions
     predictions = forecast_ann_model(ann_model, test_x)
