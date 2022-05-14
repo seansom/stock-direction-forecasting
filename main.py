@@ -5,7 +5,7 @@ import pandas as pd
 import os, sys, math, copy, shutil, shelve, warnings, json, datetime, ctypes
 from sklearn.preprocessing import PowerTransformer
 from data_processing import get_dataset, get_dates_five_years, get_trading_dates, get_transformed_final_window
-from direction_forecasting import get_optimal_hps, experiment, make_model_forecast
+from direction_forecasting import experiment, make_model_forecast, get_params_tuned
 from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtGui
 from PyQt5.QtCore import QThread
@@ -67,7 +67,7 @@ class MainWindow(qtw.QMainWindow):
 
 
         self.setWindowIcon(QtGui.QIcon('stonks_project_icon.png'))
-        appid = 'CoE/EcE 199 Capstone Project - Sombrito, Gonzales, Nolasco'
+        appid = 'CoE/ECE 199 Capstone Project - Sombrito, Gonzales, Nolasco'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
 
 
@@ -258,24 +258,30 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
-            performances = []
-            final_predictions = []
+            self.ui.status_label1.setText('Please check console for possible confirmation')
+            self.ui.status_label2.setText('Please check console for possible confirmation')
+            
+            _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=1, drop_col=None)
+
+            # for when user did not continue with News API historical call, will instead input new stock ticker
+            if train_x is None and train_y is None:
+                self.ui.status_label1.setText('Idle - Please input new stock ticker')
+                self.ui.status_label2.setText('Idle - Please input new stock ticker')
+                self.enable_ui()
+                return
 
             self.ui.status_label1.setText(f'Getting {stock_ticker} model parameters...')
             self.ui.status_label2.setText(f'Getting {stock_ticker} model parameters...')
 
             params = self.get_params(stock_ticker)
 
-            time_steps = params['time_steps']
-            hps = params['hps']
-            dropped_features = params['dropped_features']
             last_model_tuning_date = params['last_model_tuning_date']
-
 
             self.ui.status_label1.setText(f'Checking for {stock_ticker} models...')
             self.ui.status_label2.setText(f'Checking for {stock_ticker} models...')
 
             model_info = self.get_model_info(stock_ticker, last_model_tuning_date)
+
             if model_info is None:
                 self.make_models(stock_ticker, params)
                 model_info = self.get_model_info(stock_ticker, last_model_tuning_date)
@@ -393,22 +399,22 @@ class MainWindow(qtw.QMainWindow):
         self.ui.window_size_label.setText('-')
 
 
-    def update_model_info(self, hps=None):
+    def update_model_info(self, time_steps=1, hps=None, last_model_tuning_date='Never'):
         self.clear_model_info()
         
-        if hps is None:
-            last_model_tuning_date = 'Never'
-            layers = 'No data'
-            units = 'No data'
-            dropout = 'No data'
-            time_steps = 'No data'
+        if last_model_tuning_date == 'Never':
+            last_model_tuning_date = last_model_tuning_date
+            layers = str(hps['layers']) + ' (Default value)'
+            units = str(hps['units']) + ' (Default value)'
+            dropout = str(hps['dropout']) + ' (Default value)'
+            time_steps = str(time_steps) + ' (Default value)'
 
         else:
-            last_model_tuning_date = hps['last_model_tuning_date']
+            last_model_tuning_date = last_model_tuning_date
             layers = str(hps['layers'])
             units = str(hps['units'])
             dropout = str(hps['dropout'])
-            time_steps = str(hps['time_steps'])
+            time_steps = str(time_steps)
 
         self.ui.last_tuning_date_label2.setText(last_model_tuning_date)
         self.ui.layers_label.setText(layers)
@@ -434,19 +440,22 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
-            self.ui.status_label1.setText(f'Getting model information for {stock_ticker} stock...')
-            self.ui.status_label2.setText(f'Getting model information for {stock_ticker} stock...')
-
-            hps = self.get_hps(stock_ticker)
-
             # to ensure stock_ticker is valid (listed in PSE)
-            if hps is None:
-                with open('keys/EOD_API_key.txt') as file:
-                    token = file.readline()
-                
-                get_trading_dates(stock_ticker, get_dates_five_years(testing=True), token)
+            with open('keys/EOD_API_key.txt') as file:
+                token = file.readline()
+            
+            get_trading_dates(stock_ticker, get_dates_five_years(testing=True), token)
 
-            self.update_model_info(hps=hps)
+            self.ui.status_label1.setText(f'Getting model information for {stock_ticker}...')
+            self.ui.status_label2.setText(f'Getting model information for {stock_ticker}...')
+
+            params = self.get_params(stock_ticker)
+            
+            time_steps = params['time_steps']
+            hps = params['hps']
+            last_model_tuning_date = params['last_model_tuning_date']
+
+            self.update_model_info(time_steps=time_steps, hps=hps, last_model_tuning_date=last_model_tuning_date)
 
             self.ui.status_label1.setText(f'Idle - Model information for {stock_ticker} displayed')
             self.ui.status_label2.setText(f'Idle - Model information for {stock_ticker} displayed')
@@ -479,12 +488,13 @@ class MainWindow(qtw.QMainWindow):
             self.ui.status_label2.setText('Please check console for possible confirmation')
             
             date_range = get_dates_five_years()
-            hps = self.get_hps(stock_ticker)
+            params = self.get_params(stock_ticker)
 
-            if (hps is None) or (date_range[1] != hps['last_model_tuning_date']):
-                time_steps = 20
-                _, _, train_x, train_y, _, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=None)
-                
+            last_model_tuning_date = params['last_model_tuning_date']
+
+            if (last_model_tuning_date == 'Never') or (date_range[1] != last_model_tuning_date):
+                _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=1, drop_col=None)
+
                 # for when user did not continue with News API historical call, will instead input new stock ticker
                 if train_x is None and train_y is None:
                     self.ui.status_label1.setText('Idle - Please input new stock ticker')
@@ -492,34 +502,41 @@ class MainWindow(qtw.QMainWindow):
                     self.enable_ui()
                     return
 
-                self.ui.status_label1.setText(f'Tuning model for {stock_ticker} stock...')
-                self.ui.status_label2.setText(f'Tuning model for {stock_ticker} stock...')
-                
-                optimal_hps = get_optimal_hps(train_x, train_y)
+                self.ui.status_label1.setText(f'Tuning model for {stock_ticker}...')
+                self.ui.status_label2.setText(f'Tuning model for {stock_ticker}...')
+
+                tuned_params = get_params_tuned(stock_ticker, date_range)
 
                 os.chdir('data')
 
-                hps_database = shelve.open('hps_database')
-                hps_database_key = f"{stock_ticker}"
+                params_database = shelve.open('params_database')
+                params_database_key = f"{stock_ticker}"
 
-                if hps_database_key in hps_database:
-                    hps_database.pop(hps_database_key)
+                if params_database_key in params_database:
+                    params_database.pop(params_database_key)
 
                 last_model_tuning_date = date_range[1]
-                hps_database[hps_database_key] = {
-                    'last_model_tuning_date' : last_model_tuning_date,
-                    'layers' : optimal_hps['layers'],
-                    'units' : optimal_hps['units'],
-                    'dropout' : optimal_hps['dropout'],
-                    'time_steps' : time_steps
+                params_database[params_database_key] = {
+                    'time_steps' : tuned_params['time_steps'],
+                    'hps' : {
+                        'layers' : tuned_params['hps']['layers'],
+                        'units' : tuned_params['hps']['units'],
+                        'dropout' : tuned_params['hps']['dropout']
+                    },
+                    'dropped_features' : tuned_params['dropped_features'],
+                    'last_model_tuning_date' : last_model_tuning_date
                 }
 
-                hps = hps_database[hps_database_key]
+                params = params_database[params_database_key]
 
-                hps_database.close()
+                params_database.close()
                 os.chdir('..')
 
-            self.update_model_info(hps=hps)
+            time_steps = params['time_steps']
+            hps = params['hps']
+            last_model_tuning_date = params['last_model_tuning_date']
+
+            self.update_model_info(time_steps=time_steps, hps=hps, last_model_tuning_date=last_model_tuning_date)
 
             self.ui.status_label1.setText(f'Idle - Done tuning model for {stock_ticker}')
             self.ui.status_label2.setText(f'Idle - Done tuning model for {stock_ticker}')
