@@ -230,9 +230,6 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
     return perf, lstm_model, linear_scaler, scaler, col_names
 
 
-
-
-
 def make_model_forecast(model_dict, final_window):
 
     model = model_dict['model']
@@ -246,9 +243,6 @@ def make_model_forecast(model_dict, final_window):
     final_prediction = 1 if final_prediction >= 0 else 0
 
     return final_prediction
-
-
-
 
 
 def feature_selection(stock_ticker, timesteps, date_range=None, repeats=20, hps=None):
@@ -301,14 +295,15 @@ def feature_selection(stock_ticker, timesteps, date_range=None, repeats=20, hps=
     return dropped_features
 
 
-def get_params(stock_ticker, date_range=None):
+def get_params_tuned(stock_ticker, date_range=None):
 
-    time_steps_list = [10, 15]
+    time_steps_list = [1, 5, 10, 15, 20]
     dropped_features = []
 
     for step in time_steps_list:
         curr_dropped_features = feature_selection(stock_ticker, step, date_range=date_range, repeats=15, hps=None)
         dropped_features.append(curr_dropped_features)
+
 
     hps_list = []
 
@@ -316,10 +311,6 @@ def get_params(stock_ticker, date_range=None):
         _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=dropped_features[index])
         hps = get_optimal_hps(train_x, train_y)
         hps_list.append(hps)
-
-
-    print(dropped_features)
-    print(hps_list)
 
 
     repeats = 10
@@ -374,25 +365,12 @@ def get_params(stock_ticker, date_range=None):
         average_performances[index] = mean_da
 
 
-    print(dropped_features)
-    print(hps_list)
-
-
     best_hps_index = average_performances.index(max(average_performances))
 
     best_dropped_features = dropped_features[best_hps_index]
     best_hps = hps_list[best_hps_index]
     best_time_steps = time_steps_list[best_hps_index]
 
-    print('===========================')
-
-    for i in dropped_features:
-        print(i)
-
-    for i in hps_list:
-        print(i)
-
-    print('===========================')
 
     return {
         'dropped_features': best_dropped_features,
