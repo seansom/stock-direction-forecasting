@@ -165,7 +165,7 @@ class MainWindow(qtw.QMainWindow):
         last_model_tuning_date = params['last_model_tuning_date']
 
         if last_model_tuning_date != 'Never':
-            date_five_years_ago = datetime.datetime.strptime(last_model_tuning_date, '%Y-%m-%d') - datetime.timedelta(days=round(365.25 * 5))
+            date_five_years_ago = (datetime.datetime.strptime(last_model_tuning_date, '%Y-%m-%d') - datetime.timedelta(days=round(365.25 * 5))).strftime('%Y-%m-%d')
             date_range = (date_five_years_ago, last_model_tuning_date)
         
         else:

@@ -240,6 +240,11 @@ def make_model_forecast(model_dict, final_window):
     final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="log_return")
 
     final_prediction = [i.tolist() for i in final_prediction][0]
+
+    # print('====================')
+    # print(final_prediction)
+    # print('====================')
+
     final_prediction = 1 if final_prediction >= 0 else 0
 
     return final_prediction
