@@ -187,6 +187,10 @@ class MainWindow(qtw.QMainWindow):
 
             self.ui.status_label1.setText(f'Saving {stock_ticker} model {i + 1}...')
             self.ui.status_label2.setText(f'Saving {stock_ticker} model {i + 1}...')
+
+            if not os.path.exists('models'):
+                os.makedirs('models')
+
             os.chdir('models')
             model.save(f'{stock_ticker} model {i + 1}', overwrite=True)
             os.chdir('..')

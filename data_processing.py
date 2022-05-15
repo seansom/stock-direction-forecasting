@@ -1358,7 +1358,7 @@ def main():
     # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     
     final_window = scale_transform_window(final_window, linear_scaler, scaler, col_names)
-    print(final_window)
+    print(col_names)
 
     sys.exit()
 
