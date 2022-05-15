@@ -262,8 +262,8 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
-            self.ui.status_label1.setText('Please check console for possible confirmation')
-            self.ui.status_label2.setText('Please check console for possible confirmation')
+            self.ui.status_label1.setText('Please see console for possible confirmation')
+            self.ui.status_label2.setText('Please see console for possible confirmation')
             
             _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=1, drop_col=None)
 
@@ -488,8 +488,8 @@ class MainWindow(qtw.QMainWindow):
                 self.enable_ui()
                 return
 
-            self.ui.status_label1.setText('Please check console for possible confirmation')
-            self.ui.status_label2.setText('Please check console for possible confirmation')
+            self.ui.status_label1.setText('Please see console for possible confirmation')
+            self.ui.status_label2.setText('Please see console for possible confirmation')
             
             date_range = get_dates_five_years()
             params = self.get_params(stock_ticker)
