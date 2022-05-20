@@ -21,22 +21,22 @@ def requests_get(url):
 
 
 #get_technical_data START
-def get_dates_five_years(testing=False):
-    """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
-
+def get_dates_seven_years(testing=False):
+    """Returns a 2-item tuple of dates in yyyy-mm-dd format 7 years in between today.
+    
     Args:
-        testing (bool, optional): If set to true, always returns ('2017-02-13', '2022-02-11'). Defaults to False.
+        testing (bool, optional): If set to true, always returns ('2015-02-13', '2022-02-11'). Defaults to False.
 
     Returns:
         tuple: (from_date, to_date)
     """
 
     if testing:
-        return ('2017-04-13', '2022-04-13')
+        return ('2015-04-13', '2022-04-13')
 
     # generate datetime objects
     date_today = datetime.datetime.now()
-    date_five_years_ago = date_today - datetime.timedelta(days=round(365.25 * 5))
+    date_five_years_ago = date_today - datetime.timedelta(days=round(365.25 * 7))
 
     return (date_five_years_ago.strftime('%Y-%m-%d'), date_today.strftime('%Y-%m-%d'))
 
@@ -76,7 +76,11 @@ def get_technical_indicators(data):
     # compute log stock returns
     stock_returns = [np.NaN]
     for i in range(1, data_len):
-        stock_return = (Decimal(close[i]) - Decimal(close[i - 1])) / Decimal(close[i - 1])
+        try:
+            stock_return = (Decimal((close[i])) - Decimal((close[i - 1]))) / Decimal((close[i - 1]))
+        except TypeError:
+            stock_return = (Decimal(float(close[i])) - Decimal(float(close[i - 1]))) / Decimal(float(close[i - 1]))
+
         stock_returns.append(stock_return)
 
     # convert to dataframe
@@ -280,7 +284,7 @@ def transform_data(train, test):
     col_num = train.shape[1]
 
     # scale data for train & test data
-    scaler = MinMaxScaler()
+    scaler = MinMaxScaler(feature_range=(-1, 1))
     
     # Apply Yeo-Johnson Transform
     train = scaler.fit_transform(train)
@@ -412,7 +416,7 @@ def make_data_window(train, test, time_steps=1):
 
 def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     if date_range == None:
-        date_range = get_dates_five_years(testing=True)
+        date_range = get_dates_seven_years(testing=True)
 
     os.chdir('data')
 
@@ -452,7 +456,7 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
 def main():
     stock_ticker = 'AP'
 
-    linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=1, drop_col=None)    
+    linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=get_dates_seven_years(), time_steps=1, drop_col=None)    
 
     test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
     test_y = inverse_transform_data(test_y, scaler, col_names)

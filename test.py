@@ -4,4 +4,10 @@ dropped_features = ['wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'd_values'
 
 features = [f for f in all_features if f not in dropped_features]
 
+factor = 1
+
+while 21 * factor % 26 != 1:
+    factor += 1 
+
 print(features)
+print(factor)

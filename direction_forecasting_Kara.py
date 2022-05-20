@@ -5,8 +5,8 @@
 # Model Inputs: ['momentum', 'ad', 'wr', 'sma', 'wma', 'k_values', 'd_values', 'rsi', 'divergence' (macd), 'cci']
 # Model Outputs: stock_return as either 1 or 0 (upward or downard)
 # Loss: RMSE/MSE
-# Optimizer: SGD (0.1 learning rate, 0.7 momentum)
-# Epochs: 5000
+# Optimizer: SGD (0.1 learning rate, 0.4 momentum)
+# Epochs: 6000
 
 
 from tensorflow import keras, compat
@@ -34,18 +34,18 @@ class CustomCallback(keras.callbacks.Callback):
         print()
 
 
-def make_ann_model(train_x, train_y, epochs=5000):
+def make_ann_model(train_x, train_y, epochs=6000):
 
     # The ANN model to be used
     ann_model = keras.models.Sequential([
         keras.layers.Dense(units=10, activation="linear"),
-        keras.layers.Dense(units=30, activation="tanh"),
+        keras.layers.Dense(units=90, activation="tanh"),
         keras.layers.Dense(units=1, activation="sigmoid")
     ])
 
     print_train_progress_callback = CustomCallback(epochs)
 
-    optimizer = keras.optimizers.SGD(learning_rate=0.1, momentum=0.7)
+    optimizer = keras.optimizers.SGD(learning_rate=0.1, momentum=0.4)
 
     ann_model.compile(loss='mean_squared_error', optimizer=optimizer)
     ann_model.fit(train_x, train_y, epochs=epochs, verbose=0, callbacks=[print_train_progress_callback])
@@ -181,9 +181,7 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
 
 
 
-def main():
-    # stock to be predicted
-    stock_ticker = 'AP'
+def main(stock_ticker):
 
     # how many models built (min = 2)
     repeats = 10
@@ -242,4 +240,7 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    main()
+    stock_list = ['ALI', 'AP', 'BPI', 'JFC', 'MER', 'PGOLD', 'SM', 'TEL']
+
+    for stock in stock_list:
+        main(stock)

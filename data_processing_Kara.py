@@ -21,22 +21,22 @@ def requests_get(url):
 
 
 #get_technical_data START
-def get_dates_five_years(testing=False):
-    """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
+def get_dates_one_year(testing=False):
+    """Returns a 2-item tuple of dates in yyyy-mm-dd format 1 years in between today.
 
     Args:
-        testing (bool, optional): If set to true, always returns ('2017-02-13', '2022-02-11'). Defaults to False.
+        testing (bool, optional): If set to true, always returns ('2021-02-13', '2022-02-11'). Defaults to False.
 
     Returns:
         tuple: (from_date, to_date)
     """
 
     if testing:
-        return ('2017-04-13', '2022-04-13')
+        return ('2021-04-13', '2022-04-13')
 
     # generate datetime objects
     date_today = datetime.datetime.now()
-    date_five_years_ago = date_today - datetime.timedelta(days=round(365.25 * 5))
+    date_five_years_ago = date_today - datetime.timedelta(days=round(365.25 * 1))
 
     return (date_five_years_ago.strftime('%Y-%m-%d'), date_today.strftime('%Y-%m-%d'))
 
@@ -76,7 +76,11 @@ def get_technical_indicators(data):
     # compute log stock returns
     stock_returns = [np.NaN]
     for i in range(1, data_len):
-        stock_return = 1 if math.log(Decimal(close[i]) / Decimal(close[i - 1])) >= 0 else 0
+        try:
+            stock_return = 1 if math.log(Decimal((close[i])) / Decimal((close[i - 1]))) >= 0 else 0
+        except TypeError:
+            stock_return = 1 if math.log(Decimal(float(close[i])) / Decimal(float(close[i - 1]))) >= 0 else 0
+
         stock_returns.append(stock_return)
 
     # compute momentum values
@@ -88,9 +92,14 @@ def get_technical_indicators(data):
     # compute A/D indicator values
     ad = []
     for i in range(data_len):
-        ad_close = Decimal(close[i])
-        ad_low = Decimal(data['low'][i])
-        ad_high = Decimal(data['high'][i])
+        try:
+            ad_close = Decimal((close[i]))
+            ad_low = Decimal((data['low'][i]))
+            ad_high = Decimal((data['high'][i]))
+        except TypeError:
+            ad_close = Decimal(float(close[i]))
+            ad_low = Decimal(float(data['low'][i]))
+            ad_high = Decimal(float(data['high'][i]))
 
         if ad_low == ad_high:
             raise Exception(f'Error getting A/D indicator. A period has the same high and low price (zero division error).')
@@ -111,7 +120,11 @@ def get_technical_indicators(data):
         if wr_low == wr_high:
             raise Exception(f"Error getting William's %R indicator. A period has the same highest and lowest price (zero division error).")
         
-        curr_wr = Decimal(wr_high - wr_close) / Decimal(wr_high - wr_low)
+        try:
+            curr_wr = Decimal((wr_high - wr_close)) / Decimal((wr_high - wr_low))
+        except TypeError:
+            curr_wr = Decimal(float(wr_high - wr_close)) / Decimal(float(wr_high - wr_low))
+
         wr.append(curr_wr)
 
 
@@ -298,7 +311,7 @@ def train_test_split(data, time_steps):
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
-    test_len = len(data) * 2 // 10
+    test_len = len(data) * 5 // 10
     train, test = data[:-test_len], data[-test_len - time_steps:]
     return train, test
 
@@ -430,12 +443,14 @@ def make_data_window(train, test, time_steps=1):
     for i in range(train_len):
 
         if (i + time_steps) < train_len:
+            # stock returns are not an input to the model, so take all features after the first
             train_x.append([train[j, 1:] for j in range(i, i + time_steps)])
             train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
             
     for i in range(test_len):
         
         if (i + time_steps) < test_len:
+            # stock returns are not an input to the model, so take all features after the first
             test_x.append([test[j, 1:] for j in range(i, i + time_steps)])
             test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
 
@@ -451,7 +466,7 @@ def make_data_window(train, test, time_steps=1):
 
 def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     if date_range == None:
-        date_range = get_dates_five_years(testing=True)
+        date_range = get_dates_one_year(testing=True)
 
     os.chdir('data')
 
@@ -491,9 +506,10 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
 def main():
     stock_ticker = 'AP'
 
-    linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=1, drop_col=None)    
+    linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=get_dates_one_year(), time_steps=1, drop_col=None)    
 
     print(col_names)
+    print(train_x.shape)
     
 
 

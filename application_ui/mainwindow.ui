@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>397</width>
-    <height>518</height>
+    <width>401</width>
+    <height>529</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -654,7 +654,7 @@
         <x>130</x>
         <y>410</y>
         <width>251</width>
-        <height>24</height>
+        <height>41</height>
        </rect>
       </property>
       <property name="font">
@@ -664,6 +664,12 @@
       </property>
       <property name="text">
        <string>Idle</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+      </property>
+      <property name="wordWrap">
+       <bool>true</bool>
       </property>
      </widget>
      <widget class="QLabel" name="label_57">
@@ -682,6 +688,9 @@
       </property>
       <property name="text">
        <string>Program Status:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
       </property>
      </widget>
      <widget class="QLabel" name="label_17">
@@ -1155,6 +1164,9 @@
       <property name="text">
        <string>Program Status:</string>
       </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+      </property>
      </widget>
      <widget class="QLabel" name="status_label2">
       <property name="geometry">
@@ -1162,7 +1174,7 @@
         <x>130</x>
         <y>400</y>
         <width>251</width>
-        <height>24</height>
+        <height>41</height>
        </rect>
       </property>
       <property name="font">
@@ -1173,6 +1185,12 @@
       <property name="text">
        <string>Idle</string>
       </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+      </property>
+      <property name="wordWrap">
+       <bool>true</bool>
+      </property>
      </widget>
     </widget>
    </widget>
@@ -1182,7 +1200,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>397</width>
+     <width>401</width>
      <height>26</height>
     </rect>
    </property>

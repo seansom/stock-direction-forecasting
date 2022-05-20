@@ -186,12 +186,10 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
 
 
 
-def main():
-    # stock to be predicted
-    stock_ticker = 'MER'
+def main(stock_ticker):
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 10
 
     
     print("===================================================")
@@ -247,4 +245,7 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     compat.v1.logging.set_verbosity(compat.v1.logging.ERROR)
 
-    main()
+    stock_list = ['ALI', 'AP', 'BPI', 'JFC', 'MER', 'PGOLD', 'SM', 'TEL']
+
+    for stock in stock_list:
+        main(stock)

@@ -221,8 +221,8 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
     test_y = np.array([test_y[i, -1] for i in range(len(test_y))])
 
     # revert the normalization scalings done
-    test_y = inverse_transform_data(test_y, scaler, col_names, feature="log_return")
-    predictions = inverse_transform_data(predictions, scaler, col_names, feature="log_return")
+    test_y = inverse_transform_data(test_y, scaler, col_names, feature="stock_return")
+    predictions = inverse_transform_data(predictions, scaler, col_names, feature="stock_return")
 
     # get model performance statistics
     perf = get_lstm_model_perf(predictions, test_y)
@@ -237,13 +237,9 @@ def make_model_forecast(model_dict, final_window):
     col_names = model_dict['col_names']
 
     final_prediction = forecast_lstm_model(model, final_window)
-    final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="log_return")
+    final_prediction = inverse_transform_data(final_prediction, scaler, col_names, feature="stock_return")
 
     final_prediction = [i.tolist() for i in final_prediction][0]
-
-    # print('====================')
-    # print(final_prediction)
-    # print('====================')
 
     final_prediction = 1 if final_prediction >= 0 else 0
 
@@ -390,15 +386,15 @@ def main():
     stock_ticker = 'PGOLD'
 
     # parameters of each model
-    time_steps = 1
+    time_steps = 20
 
-    hps = {'units': 32, 'layers': 1, 'dropout': 0.30000000000000004, 'tuner/epochs': 4, 'tuner/initial_epoch': 0, 'tuner/bracket': 3, 'tuner/round': 0}
+    hps = {'units': 32, 'layers': 2, 'dropout': 0.4, 'tuner/epochs': 4, 'tuner/initial_epoch': 0, 'tuner/bracket': 3, 'tuner/round': 0}
 
     # how many models built (min = 2)
     repeats = 10
 
     # dropped features
-    dropped_features = ['wr', 'cmf', 'rsi', 'cci', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'inflation', 'real_interest_rate', 'roe', 'psei_returns', 'sentiment']
+    dropped_features = ['ad', 'wr', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
     
     print("===================================================")
@@ -449,11 +445,11 @@ def main():
 
 
 def test_forecast():
-    stock_ticker = 'JFC'
+    stock_ticker = 'PGOLD'
 
-    time_steps = 1
-    hps = None
-    dropped_features = None
+    time_steps = 20
+    hps = {'layers':2, 'units':32, 'dropout':0.4}
+    dropped_features = ['ad', 'wr', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
 
     perf, model, linear_scaler, scaler, col_names = experiment(stock_ticker, time_steps, date_range=None, drop_col=dropped_features, hps=hps)
 

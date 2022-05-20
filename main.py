@@ -385,8 +385,8 @@ class MainWindow(qtw.QMainWindow):
             print("===================================================")
 
 
-            self.ui.status_label1.setText('Idle')
-            self.ui.status_label2.setText('Idle')
+            self.ui.status_label1.setText(f'Idle - Forecast made for {stock_ticker} stock')
+            self.ui.status_label2.setText(f'Idle - Forecast made for {stock_ticker} stock')
             self.enable_ui()
 
         except json.decoder.JSONDecodeError:

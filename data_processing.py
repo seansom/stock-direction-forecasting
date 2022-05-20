@@ -76,15 +76,24 @@ def get_technical_indicators(data):
     # compute log stock returns
     stock_returns = [np.NaN]
     for i in range(1, data_len):
-        stock_return = math.log(Decimal(close[i]) / Decimal(close[i - 1]))
+        try:
+            stock_return = math.log(Decimal((close[i])) / Decimal((close[i - 1])))
+        except TypeError:
+            stock_return = math.log(Decimal(float(close[i])) / Decimal(float(close[i - 1])))
+
         stock_returns.append(stock_return)
 
     # compute A/D indicator values
     ad = []
     for i in range(data_len):
-        ad_close = Decimal(close[i])
-        ad_low = Decimal(data['low'][i])
-        ad_high = Decimal(data['high'][i])
+        try:
+            ad_close = Decimal((close[i]))
+            ad_low = Decimal((data['low'][i]))
+            ad_high = Decimal((data['high'][i]))
+        except TypeError:
+            ad_close = Decimal(float(close[i]))
+            ad_low = Decimal(float(data['low'][i]))
+            ad_high = Decimal(float(data['high'][i]))
 
         if ad_low == ad_high:
             raise Exception(f'Error getting A/D indicator. A period has the same high and low price (zero division error).')
@@ -105,7 +114,11 @@ def get_technical_indicators(data):
         if wr_low == wr_high:
             raise Exception(f"Error getting William's %R indicator. A period has the same highest and lowest price (zero division error).")
         
-        curr_wr = Decimal(wr_high - wr_close) / Decimal(wr_high - wr_low)
+        try:
+            curr_wr = Decimal((wr_high - wr_close)) / Decimal((wr_high - wr_low))
+        except TypeError:
+            curr_wr = Decimal(float(wr_high - wr_close)) / Decimal(float(wr_high - wr_low))
+            
         wr.append(curr_wr)
 
     # compute Chaulkin Money Flow indicator
@@ -115,9 +128,15 @@ def get_technical_indicators(data):
     cmf = [np.NaN] * (cmf_period - 1)
 
     for i in range(data_len):
-        cmf_close = Decimal(close[i])
-        cmf_low = Decimal(data['low'][i])
-        cmf_high = Decimal(data['high'][i])
+        try:
+            cmf_close = Decimal((close[i]))
+            cmf_low = Decimal((data['low'][i]))
+            cmf_high = Decimal((data['high'][i]))
+        except TypeError:
+            cmf_close = Decimal(float(close[i]))
+            cmf_low = Decimal(float(data['low'][i]))
+            cmf_high = Decimal(float(data['high'][i]))
+
         cmf_volume = data['volume'][i]
 
         if cmf_low == cmf_high:
@@ -134,7 +153,7 @@ def get_technical_indicators(data):
     # convert to dataframe
     technical_indicators = pd.DataFrame({
         'date': data['date'],
-        'log_return': stock_returns,
+        'stock_return': stock_returns,
         'ad' : ad,
         'wr' : wr,
         'cmf' : cmf
@@ -344,7 +363,11 @@ def get_psei_returns(date_range, token):
 
     stock_returns = [np.NaN]
     for i in range(1, data_len):
-        stock_return = math.log(Decimal(close[i]) / Decimal(close[i - 1]))
+        try:
+            stock_return = math.log(Decimal((close[i])) / Decimal((close[i - 1])))
+        except:
+            stock_return = math.log(Decimal(float(close[i])) / Decimal(float(close[i - 1])))
+
         stock_returns.append(stock_return)
 
     #convert into pd.Dataframe    
@@ -1061,7 +1084,7 @@ def transform_data(train, test):
     return scaler, train, test, col_names
 
 
-def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
+def inverse_transform_data(data, scaler, col_names, feature="stock_return"):
     """Inverses scaling done through Yeo-Johnson transformation. To be used
     with the predicted stock returns of the direction forecasting model.
 
@@ -1070,7 +1093,7 @@ def inverse_transform_data(data, scaler, col_names, feature="Stock Returns"):
         scaler (PowerTransformer): The scaler used to scale data.
         col_names (list): The list of the column names of the initaial dataset.
         feature (str, optional): The single feature to invert scaling. 
-        Defaults to "Stock Returns".
+        Defaults to "stock_return".
 
     Returns:
         np.array: The array representing the unscaled data.
@@ -1144,7 +1167,7 @@ def make_data_window(train, test, time_steps=1):
         pd.DataFrame (4): The train_x, train_y, test_x, and test_y datasets.
     """	
     # get the column index of stock returns in the dataframe
-    stock_returns_index = train.columns.get_loc("log_return")
+    stock_returns_index = train.columns.get_loc("stock_return")
 
     # convert dataframes into numpy arrays
     train = train.to_numpy()
@@ -1355,7 +1378,7 @@ def main():
     linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=get_dates_five_years(), time_steps=20, drop_col=None)
     final_window = get_final_window(stock_ticker, date_range=get_dates_five_years(), time_steps=20, drop_col=None)
 
-    # col_names = ['log_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
+    # col_names = ['stock_return', 'ad', 'wr', 'cmf', 'atr', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     
     final_window = scale_transform_window(final_window, linear_scaler, scaler, col_names)
     print(col_names)

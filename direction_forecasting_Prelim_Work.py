@@ -186,12 +186,12 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
 def main():
     # stock to be predicted
     stock_ticker = 'JFC'
-
+    
     # parameters of each model
     time_steps = 1
 
     # how many models built (min = 2)
-    repeats = 2
+    repeats = 10
 
     
     print("===================================================")
