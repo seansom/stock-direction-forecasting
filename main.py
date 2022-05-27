@@ -2,7 +2,6 @@ from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
 import pandas as pd
-import os, sys, math, copy, shutil, shelve, warnings, json, datetime, ctypes
 from sklearn.preprocessing import PowerTransformer
 from data_processing import get_dataset, get_dates_five_years, get_trading_dates, get_transformed_final_window
 from direction_forecasting import experiment, make_model_forecast, get_params_tuned
@@ -10,11 +9,15 @@ from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtGui
 from PyQt5.QtCore import QThread
 from mainwindow import Ui_MainWindow
-
-
+import os, sys, math, copy, shutil, shelve, warnings, json, datetime, ctypes
 
 
 class PredictionThread(QThread):
+    """Thread class instantiated to make direction forecasts.
+    Multi-threading is utilized to prevent application UI from
+    freezing while the application is computing a direction forecast.
+    """
+
     def __init__(self, main_window):
         QThread.__init__(self)
         self.main_window = main_window
@@ -25,6 +28,11 @@ class PredictionThread(QThread):
 
 
 class GettingThread(QThread):
+    """Thread class instantiated to get direction forecasting model information.
+    Multi-threading is utilized to prevent application UI from
+    freezing while the application is accessing model database.
+    """
+
     def __init__(self, main_window):
         QThread.__init__(self)
         self.main_window = main_window
@@ -35,6 +43,11 @@ class GettingThread(QThread):
 
 
 class TuningThread(QThread):
+    """Thread class instantiated to get tune direction forecasting models.
+    Multi-threading is utilized to prevent application UI from
+    freezing while the application is tuning the models.
+    """
+
     def __init__(self, main_window):
         QThread.__init__(self)
         self.main_window = main_window
@@ -50,6 +63,7 @@ class MainWindow(qtw.QMainWindow):
     Args:
         qtw (QMainWindow): PyQt5 Main Window Widget
     """
+
     def __init__(self, app, parent=None):
         super().__init__(parent)
 
@@ -72,6 +86,10 @@ class MainWindow(qtw.QMainWindow):
 
 
     def disable_ui(self):
+        """Disables application UI from being interacted. Called
+        whenever user initiates an application task.
+        """
+
         self.ui.stock_ticker_line_edit1.setEnabled(False)
         self.ui.predict_button.setEnabled(False)
         self.ui.stock_ticker_line_edit2.setEnabled(False)
@@ -81,6 +99,10 @@ class MainWindow(qtw.QMainWindow):
 
 
     def enable_ui(self):
+        """Enables application UI from being interacted. Called
+        whenever application finishes a user-initiated task.
+        """  
+
         self.ui.stock_ticker_line_edit1.setEnabled(True)
         self.ui.predict_button.setEnabled(True)
         self.ui.stock_ticker_line_edit2.setEnabled(True)
@@ -90,6 +112,9 @@ class MainWindow(qtw.QMainWindow):
 
 
     def clear_predictions_ui(self):
+        """Resets the information shown in the Predictions tab
+        of the application.
+        """        
 
         repeats = 5
 
@@ -111,6 +136,15 @@ class MainWindow(qtw.QMainWindow):
 
 
     def get_params(self, stock_ticker):
+        """Returns model parameters (hyperparams, features, etc.) gotten
+        from the params database.
+
+        Args:
+            stock_ticker (str): The stock whose model params is needed.
+
+        Returns:
+            dict: A dictionary representing model parameters.
+        """ 
 
         os.chdir('data')
 
@@ -139,12 +173,24 @@ class MainWindow(qtw.QMainWindow):
 
 
     def get_model_info(self, stock_ticker, last_model_tuning_date):
+        """Returns model info (performance metrics, training date, etc.)
+        gotten from the model_info database.
+
+        Args:
+            stock_ticker (_type_): _description_
+            last_model_tuning_date (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
 
         os.chdir('data')
 
         model_info_database = shelve.open('model_info_database')
         model_info_database_key = f"{stock_ticker}"
 
+        # check if stock ticker and last_model_tuning_date match with that found in the database
+        # if so, access database to get model info 
         if model_info_database_key in model_info_database and last_model_tuning_date in [model_info_database[model_info_database_key]['training_date'], 'Never']:
             model_info = model_info_database[model_info_database_key]
 
@@ -158,6 +204,13 @@ class MainWindow(qtw.QMainWindow):
 
 
     def make_models(self, stock_ticker, params):
+        """Creates and saves direction forecasting models and their model info
+        to the models directory and model_info database, respectively.
+
+        Args:
+            stock_ticker (str): The stock whose models are to be created.
+            params (dict): A dictionary representing model parameters.
+        """
 
         time_steps = params['time_steps']
         hps = params['hps']
@@ -244,6 +297,10 @@ class MainWindow(qtw.QMainWindow):
 
 
     def make_prediction(self):
+        """Called whenever the Predict button in the application UI is clicked.
+        The application will creates/retrieve models based on user-inputted stock
+        to make a next trading day direction forecast.
+        """
 
         repeats = 5
 
@@ -277,6 +334,7 @@ class MainWindow(qtw.QMainWindow):
             self.ui.status_label1.setText(f'Getting {stock_ticker} model parameters...')
             self.ui.status_label2.setText(f'Getting {stock_ticker} model parameters...')
 
+            # get model parameters from database
             params = self.get_params(stock_ticker)
 
             last_model_tuning_date = params['last_model_tuning_date']
@@ -284,8 +342,10 @@ class MainWindow(qtw.QMainWindow):
             self.ui.status_label1.setText(f'Checking for {stock_ticker} models...')
             self.ui.status_label2.setText(f'Checking for {stock_ticker} models...')
 
+            # get model information from database
             model_info = self.get_model_info(stock_ticker, last_model_tuning_date)
 
+            # build models if no available saved models
             if model_info is None:
                 self.make_models(stock_ticker, params)
                 model_info = self.get_model_info(stock_ticker, last_model_tuning_date)
@@ -338,6 +398,9 @@ class MainWindow(qtw.QMainWindow):
                     'params': params
                 }
 
+                # only need to get final window input to the models and last observed trading day once
+                # final window represents the last window of model input features to compute the
+                # next trading day direction forecast
                 if i == 0:
                     final_window, last_observed_trading_day = get_transformed_final_window(stock_ticker, model_dict)
                     self.ui.result_last_trading_day_label.setText(last_observed_trading_day)

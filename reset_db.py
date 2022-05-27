@@ -1,4 +1,5 @@
-# Simple script used to delete databases. Used when changing the specific direction forecasting files used for testing
+# Simple script used to delete databases. 
+# Only used in testing and obtaining results of alternative direction forecasting models.
 
 import os, shutil
 

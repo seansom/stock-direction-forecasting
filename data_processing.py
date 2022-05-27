@@ -1,17 +1,25 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-import datetime, requests, json, math, shelve, sys, os, re, pathlib, nltk, shutil, zipfile
-
 from decimal import Decimal
 from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
 from pattern.en import lexeme
+import datetime, requests, json, math, shelve, sys, os, re, pathlib, nltk, shutil, zipfile
+
 
 def requests_get(url):
+    """Wrapper function for the requests.get method. Implements a connection timeout
+    error handling by restarting the GET request after 10 seconds.
 
+    Args:
+        url (str): The URL of the GET request.
+
+    Returns:
+        Response: The response of the GET request.
+    """
     while True:
         try:
             return requests.get(url, timeout=10)
@@ -25,7 +33,7 @@ def get_dates_five_years(testing=False):
     """Returns a 2-item tuple of dates in yyyy-mm-dd format 5 years in between today.
 
     Args:
-        testing (bool, optional): If set to true, always returns ('2017-02-13', '2022-02-11'). Defaults to False.
+        testing (bool, optional): If set to true, always returns ('2017-04-13', '2022-04-13'). Defaults to False.
 
     Returns:
         tuple: (from_date, to_date)
@@ -42,6 +50,16 @@ def get_dates_five_years(testing=False):
 
 
 def get_trading_dates(stock_ticker, date_range, token):
+    """Returns a dataframe of all trading dates of a given stock in a given date range.
+
+    Args:
+        stock_ticker (_type_): The stock whose trading dates is needed.
+        date_range (tuple): (from_date, to_date)
+        token (str): The EOD API token used for authentication.
+
+    Returns:
+        pd.Dataframe: A dataframe of all the trading dates of a stock within the specified date range.
+    """    
 
     exchange = 'PSE'
     url = f"https://eodhistoricaldata.com/api/eod/{stock_ticker}.{exchange}?api_token={token}&order=a&fmt=json&from={date_range[0]}&to={date_range[1]}"
@@ -188,6 +206,7 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     
     if indicator != 'macd':
         url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    # use (4, 22, 3) period for MACD indicator
     else:
         url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
 
@@ -213,12 +232,10 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
     # reset indices after dropping rows
     data = data.reset_index(drop=True)
 
-
     # raise an exception if the data from EOD API is insufficient to cover the date range specified
     # this error may be fixed by increasing timedelta used in computing adjusted_first_day
     if data['date'][0] != date_range[0]:
         raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
-
 
     return data
 
@@ -1105,7 +1122,7 @@ def inverse_transform_data(data, scaler, col_names, feature="stock_return"):
     return unscaled_data[feature].values
 
 
-def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None, time_steps=1):
+def data_processing(technical_data, fundamental_data, sentimental_data, drop_col=None, time_steps=1):    
     """Splits a dataset into training and testing samples.
     The train and test data are split with a ratio of 8:2.
 
@@ -1203,6 +1220,26 @@ def make_data_window(train, test, time_steps=1):
 
 
 def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
+    """Function that gets, processes, and returns a specified stock's dataset 
+    at a particular date_range from the APIs. Also returns the linear_scaler,
+    scaler, and col_names used in building the processed dataset.
+
+    Args:
+        stock_ticker (str): The stock whose dataset is needed.
+        date_range (tuple, optional): (from_date, to_date). Defaults to None.
+        time_steps (int, optional): The number of time_steps or window size of the dataset. Defaults to 1.
+        drop_col (list, optional): The list of dropped features or columns in the dataset. Defaults to None.
+
+    Returns:
+        linear_scaler, list: List of scaling factors used to scale the dataset.
+        scaler, PowerTransformer: The power transformer used to transform the dataset.
+        col_names, list: List of features or column names for the dataset.
+        train_x, np.array: Array representing the training inputs dataset.
+        train_y, np.array: Array representing the training targets dataset.
+        test_x, np.array: Array representing the testing inputs dataset.
+        test_y, np.array: Array representing the testing targets dataset.
+    """
+
     if date_range == None:
         date_range = get_dates_five_years(testing=True)
 
@@ -1256,6 +1293,22 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
 
 
 def get_final_window(stock_ticker, date_range=None, time_steps=1, drop_col=None):
+    """Returns the final window array representing the model input features to get the next
+    trading day direction forecast.
+
+    Args:
+        stock_ticker (str): The stock whose final window is needed.
+        date_range (tuple, optional): (from_date, to_date). Defaults to None.
+        time_steps (int, optional): The number of time_steps or window size. Defaults to 1.
+        drop_col (list, optional): The list of dropped features or columns in the dataset. Defaults to None.
+
+    Raises:
+        Exception: Exception is raised if there are null values found in the dataset.
+
+    Returns:
+        np.array: Array representing the final window of model input features.
+    """
+
     if date_range == None:
         date_range = get_dates_five_years(testing=True)
 
@@ -1326,6 +1379,18 @@ def get_final_window(stock_ticker, date_range=None, time_steps=1, drop_col=None)
 
 
 def scale_transform_window(window, linear_scaler, scaler, col_names):
+    """Scales and power transforms a window of values based on a previously used scalers.
+
+    Args:
+        window (np.array): The window to be scaled and transforms.
+        linear_scaler (list): List of scaling factors used to scale the dataset.
+        scaler (PowerTransformer): The power transformer used to transform the dataset.
+        col_names (list): List of dropped features or columns in the dataset.
+
+    Returns:
+        np.array: The scaled and transformed window.
+    """
+    
 
     window = np.reshape(window.copy(), window.shape[1:])
 
@@ -1350,6 +1415,18 @@ def scale_transform_window(window, linear_scaler, scaler, col_names):
 
 
 def get_transformed_final_window(stock_ticker, model_dict):
+    """Returns the scaled and transformed final window array representing the 
+    model input features to get the next trading day direction forecast.
+
+    Args:
+        stock_ticker (str): The stock whose transformed final window is needed.
+        model_dict (dict): Dictionary representing the scalers and column names
+        used in building a model/dataset.
+
+    Returns:
+        np.array: Array representing the scaled and transformed final window of model input features.
+    """
+
 
     linear_scaler = model_dict['linear_scaler']
     scaler = model_dict['scaler']

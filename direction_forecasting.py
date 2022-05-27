@@ -27,6 +27,18 @@ class CustomCallback(keras.callbacks.Callback):
 
 
 def make_lstm_hypermodel(hp, time_steps, features):
+    """Builds and returns an LSTM hypermodel based on hyperparameters,
+    time_steps, and number of features.
+
+    Args:
+        hp (kt hyperparameter): Used by the keras tuner to define the hyperparameters.
+        time_steps (int): The number of timesteps or window size of the LSTM model.
+        features (int): The number of input features for the LSTM model.
+
+    Returns:
+        kt hypermodel: A model created and tested by keras tuner.
+    """
+
     # a hypermodel has keras tuner hyperparameters (hp) that are variable
     lstm_hypermodel = keras.models.Sequential()
 
@@ -46,6 +58,17 @@ def make_lstm_hypermodel(hp, time_steps, features):
 
 
 def get_optimal_hps(train_x, train_y):
+    """Returns optimal direction forecasting model hyperparameters.
+
+    Args:
+        train_x (np.array): The training inputs dataset of a direction forecasting model.
+        train_y (np.array): The training targets dataset of a direction forecasting model.
+
+    Returns:
+        dict: A dictionary representing the optimal hyperparameters gotten using keras tuner
+        utilizing the Hyperband optimization algorithm.
+    """
+
     # the tuner saves files to the current working directory, delete old files if any
     if os.path.exists('untitled_project'):
         shutil.rmtree('untitled_project')
@@ -73,7 +96,21 @@ def get_optimal_hps(train_x, train_y):
 
 
 def make_lstm_model(train_x, train_y, epochs=100, hps=None, window=None):
+    """Builds and returns an LSTM model based on a given training dataset and
+    optional hyperparameters.
 
+    Args:
+        train_x (np.array): The training inputs dataset of a direction forecasting model.
+        train_y (np.array): The training targets dataset of a direction forecasting model.
+        epochs (int, optional): The number of epochs that the model will be trained for. Defaults to 100.
+        hps (dict, optional): A dictionary representing model hyperparameters. Defaults to None.
+        window (Ui_MainWindow, optional): The application UI window. Defaults to None.
+
+    Returns:
+        keras.models.Sequential: The LSTM model built and trained.
+    """
+
+    # default model hyperparameters
     if hps is None:
         layers = 3
         units = 64
@@ -104,10 +141,12 @@ def forecast_lstm_model(model, test_x, window=None):
     Args:
         model (Model): The built Keras model used for forecasting.
         test_x (np.array): The model inputs for testing and forecasting.
+        window (Ui_MainWindow, optional): The application UI window. Defaults to None.
 
     Returns:
         np.array: A numpy array of the forecasted future values.
-    """	
+    """
+
     predictions = []
 
     test_len = test_x.shape[0]
@@ -195,11 +234,16 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
     Args:
         stock_ticker (string): The target stock to be predicted.
         time_steps (int): The number of timesteps in the data window inputs.
-        epochs (int): The maximum number of training epochs.
+        date_range (tuple, optional): (from_date, to_date). Defaults to None.
+        drop_col (list, optional): The features or columns to be dropped in the model. Defaults to None.
+        test_on_val (bool, optional): If set to True, performance will be evaluated on validation data. Defaults to False.
+        hps (dict, optional): Dictionary representing model hyperparameters. Defaults to None.
+        window (Ui_MainWindow, optional): The application UI window. Defaults to None.
 
     Returns:
-        dict: A dictionary of the performance metrics of the created model.
-    """
+        tuple: A tuple consisting of model performance metrics, the model itself, 
+        and the linear_scaler, scaler, and col_names used in building the model.
+    """    
 
     linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y = get_dataset(stock_ticker, date_range=date_range, time_steps=time_steps, drop_col=drop_col)
 
@@ -231,6 +275,19 @@ def experiment(stock_ticker, time_steps, date_range=None, drop_col=None, test_on
 
 
 def make_model_forecast(model_dict, final_window):
+    """Returns a next trading day direction forecast using a model
+    stored in a dictionary and the final_window.
+
+    Args:
+        model_dict (dict): A dictionary representing the model, as well as the scaler
+        and col_names used in building the model.
+        final_window (np.array): An array representing the scaled and transformed
+        model input features to be used to make a next trading day direction forecast.
+
+    Returns:
+        int: An integer either 1 or 0, representing a forecasted upward or downward
+        direction, respectively.
+    """
 
     model = model_dict['model']
     scaler = model_dict['scaler']
@@ -246,7 +303,22 @@ def make_model_forecast(model_dict, final_window):
     return final_prediction
 
 
-def feature_selection(stock_ticker, timesteps, date_range=None, repeats=20, hps=None):
+def feature_selection(stock_ticker, timesteps, date_range=None, repeats=15, hps=None):
+    """Returns the optimal features that should be dropped in a given stock's dataset.
+    The algorithm used for feature selection is a simple sequential adding of features
+    (ordered based on indicator type), building models, and checking if an added feature improves 
+    average validation set model performance.
+
+    Args:
+        stock_ticker (str): The stock whose model features need to be optimized.
+        timesteps (int): The number of time steps or window size of the model.
+        date_range (tuple, optional): (from_date, to_date)
+        repeats (int, optional): How many models created in computing average performance. Defaults to 15.
+        hps (dict, optional): A dictionary representing model hyperparameters. Defaults to None.
+
+    Returns:
+        list: List representing the optimal features of a stock's direction forecasting model.
+    """
     
     features = ['ad', 'wr', 'cmf', 'atr', 'rsi', 'cci', 'adx', 'slope', 'k_values', 'd_values', 'macd', 'signal', 'divergence', 'gdp', 'inflation', 'real_interest_rate', 'roe', 'eps', 'p/e', 'psei_returns', 'sentiment']
     num_features = len(features)
@@ -297,6 +369,16 @@ def feature_selection(stock_ticker, timesteps, date_range=None, repeats=20, hps=
 
 
 def get_params_tuned(stock_ticker, date_range=None):
+    """Returns a dictionary of optimal model parameters (hps, time_steps, dropped_features) through
+    the use of Hyperband, manual search, and feature selection.
+
+    Args:
+        stock_ticker (str): The stock whose optimal parameters are needed.
+        date_range (tuple, optional): (from_date, to_date). Defaults to None.
+
+    Returns:
+        dict: A dictionary representing the optimal model parameters.
+    """    
 
     time_steps_list = [1, 5, 10, 15, 20]
     dropped_features = []
@@ -381,6 +463,7 @@ def get_params_tuned(stock_ticker, date_range=None):
 
 
 
+
 def main():
     # stock to be predicted
     stock_ticker = 'PGOLD'
@@ -445,6 +528,9 @@ def main():
 
 
 def test_forecast():
+    """Function to test capability of program to make a next trading day
+    direction forecast.
+    """    
     stock_ticker = 'PGOLD'
 
     time_steps = 20
