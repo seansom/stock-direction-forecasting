@@ -1,16 +1,16 @@
 from tensorflow import keras, compat
 from statistics import mean, stdev
 import numpy as np
-import pandas as pd
 import keras_tuner as kt
-import os, sys, math, warnings, shutil
-from data_processing import get_dates_five_years, get_trading_dates, get_dataset, inverse_transform_data, get_transformed_final_window
+import os, warnings, shutil
+from data_processing import get_dataset, inverse_transform_data, get_transformed_final_window
 
 
 class CustomCallback(keras.callbacks.Callback):
     """A callback class used to print the progress of model fitting
     after each epoch.
     """	
+
     def __init__(self, epochs, window=None):
         self.epochs = epochs
         self.window = window
@@ -462,8 +462,6 @@ def get_params_tuned(stock_ticker, date_range=None):
     }
 
 
-
-
 def main():
     # stock to be predicted
     stock_ticker = 'PGOLD'
@@ -526,11 +524,11 @@ def main():
     print(f"Pessimistic Baseline DA: {round(pessimistic_baseline, 6)}")
 
 
-
 def test_forecast():
     """Function to test capability of program to make a next trading day
     direction forecast.
     """    
+
     stock_ticker = 'PGOLD'
 
     time_steps = 20

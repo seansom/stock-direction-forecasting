@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from decimal import Decimal
-from sklearn import preprocessing
 from sklearn.preprocessing import PowerTransformer
 from eventregistry import *
 from statistics import mean
@@ -20,6 +19,7 @@ def requests_get(url):
     Returns:
         Response: The response of the GET request.
     """
+
     while True:
         try:
             return requests.get(url, timeout=10)
@@ -53,7 +53,7 @@ def get_trading_dates(stock_ticker, date_range, token):
     """Returns a dataframe of all trading dates of a given stock in a given date range.
 
     Args:
-        stock_ticker (_type_): The stock whose trading dates is needed.
+        stock_ticker (str): The stock whose trading dates is needed.
         date_range (tuple): (from_date, to_date)
         token (str): The EOD API token used for authentication.
 
@@ -242,12 +242,15 @@ def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exc
 
 def get_technical_data(stock_ticker, date_range):
     """Computes and gets technical dataset for a specific stock. To be used for model training.
+    
     Args:
-        stock_ticker ([type]): [description]
-        date_range ([type]): [description]
+        stock_ticker (str): The stock whose technical data is needed.
+        date_range (tuple): (from_date, to_date)
+    
     Raises:
         Exception: Raises exception whenever np.NaN is present in the processed technical dataset.
         This can occur if the EOD API data is missing data for a technical indicator on a specific day.
+    
     Returns:
         pd.Dataframe: Dataframe representing the dates, log stock returns, and technical indicators.
     """
@@ -313,6 +316,7 @@ def get_technical_data(stock_ticker, date_range):
     return data
 #get_technical_data END
 
+
 #get_fundamental_data START
 def get_fundamental_trading_dates(stock_ticker, date_range, token):
     """compiles trading dates and adjusted closing prices to be used as a base data set for the fundamental data
@@ -343,6 +347,7 @@ def get_fundamental_trading_dates(stock_ticker, date_range, token):
         close = 'close'
 
     return data[['date', close]]
+
 
 def get_psei_returns(date_range, token):
     """computes log stock returns for PSEI
@@ -411,6 +416,7 @@ def get_psei_returns(date_range, token):
     
     return psei_returns
 
+
 def get_fundamental_indicator_from_EOD(stock_ticker, token):
     """get fundamental indicators from EOD
 
@@ -430,6 +436,7 @@ def get_fundamental_indicator_from_EOD(stock_ticker, token):
     data = response.json()
 
     return data
+
 
 def get_macro_indicator_from_EOD(token, date_range):
     """compiles macroeconomic data from eod
@@ -492,6 +499,7 @@ def get_macro_indicator_from_EOD(token, date_range):
     })
     
     return macro_data
+
 
 def get_fundamental_data(stock_ticker, date_range):
     """Computes fundamental data for a specific stock. Also adds macro economic data. To be used for model training.
@@ -620,8 +628,14 @@ def get_fundamental_data(stock_ticker, date_range):
     return fundamental_data
 #get_fundamental_data END
 
+
 #get_sentimental_data START
 def pattern_stopiteration_workaround():
+    """Function to workaround the raised StopIteration every first call of pattern().
+    Also ensures that all necessary nltk data is downloaded.
+    """
+
+    # download necessary nltk data if not present
     try:
         nltk.data.find('corpora/omw-1.4')
     except LookupError:
@@ -637,6 +651,7 @@ def pattern_stopiteration_workaround():
     except LookupError:
         nltk.download('averaged_perceptron_tagger')
 
+    # StopIteration workaround
     try:
         lexeme('gave')
     except:
@@ -645,9 +660,11 @@ def pattern_stopiteration_workaround():
 
 def get_dates_between(start_date, end_date):
     """Returns a list of dates in yyyy-mm-dd format between two given dates.
+    
     Args:
         start_date (str): The starting date.
         end_date (str): The ending date.
+    
     Returns:
         list: A list of date strings.
     """
@@ -667,8 +684,10 @@ def get_dates_between(start_date, end_date):
 
 def clean_text(text):
     """Cleans an input text (sentence).
+
     Args:
         text (str): The text to be cleaned.
+
     Returns:
         string: The cleaned text.
     """
@@ -689,10 +708,12 @@ def clean_text(text):
 
 def text_to_int(vocab, texts, max_seq_length):
     """Converts a set of texts (sentences) into their numerical representations.
+
     Args:
         vocab (dict): A dictionary with words as keys and their integer equivalent as values.
         texts (list): The list of texts (sentences) to be converted.
         max_seq_length (int): The length of the longest sentence during model building.
+
     Returns:
         list: A list of lists wherein each element represents the numerical representation of a specific text (sentence).
     """
@@ -702,6 +723,7 @@ def text_to_int(vocab, texts, max_seq_length):
 
     sequences = []
     for text in texts:
+        # tokenize (split) a sentence for parts of speech tagging
         tokenized_text = nltk.word_tokenize(text)
         tags = nltk.pos_tag(tokenized_text)
         
@@ -730,7 +752,7 @@ def text_to_int(vocab, texts, max_seq_length):
                         appended = 1
                         break
                 
-                # set to 0 if all possible still not in vocab
+                # set to 0 if all possible tenses still not in vocab
                 if not appended:
                     sequence.append(0)
             
@@ -744,11 +766,13 @@ def text_to_int(vocab, texts, max_seq_length):
 
 
 def load_json_to_dict(path_file_name):
-    """Loads a json file to a dictionary.
+    """Loads a dictionary stored in a json file.
+
     Args:
         path_file_name (str): The json file name or the path to it.
+
     Returns:
-        dict: A dictionary that contains the json file contents.
+        dict: The dictionary stored in the json file.
     """
 
     file = open(path_file_name, "r")
@@ -760,10 +784,12 @@ def load_json_to_dict(path_file_name):
 
 def get_news(stock_ticker, date_range, historical=False):
     """Gets news data from News API.
+
     Args:
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
         historical (bool, optional): If set to true, access historical news data. Defaults to False.
+    
     Returns:
         tuple: (list, dict)
             list: A list containing raw (complete with extras) news data.
@@ -793,6 +819,7 @@ def get_news(stock_ticker, date_range, historical=False):
 
         er = EventRegistry(apiKey=token, allowUseOfArchive=False)
     
+    # adjust starting date by 1 day before
     start_date = datetime.datetime.strptime(date_range[0], '%Y-%m-%d')
     start_date = (start_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
 
@@ -823,11 +850,13 @@ def get_news(stock_ticker, date_range, historical=False):
             dateTime = article["dateTimePub"]
             dateTime = re.sub("[a-zA-Z]", "", dateTime)
             dateTime = datetime.datetime.strptime(dateTime, '%Y-%m-%d%H:%M:%S')
+            # adjust dateTime by 8 hours from UTC+0 to UTC+8
             date = (dateTime + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
         else:
             dateTime = article["dateTime"]
             dateTime = re.sub("[a-zA-Z]", "", dateTime)
             dateTime = datetime.datetime.strptime(dateTime, '%Y-%m-%d%H:%M:%S')
+            # adjust dateTime by 8 hours from UTC+0 to UTC+8
             date = (dateTime + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
         
         if (date < date_range[0]) or (date > date_range[1]):
@@ -845,11 +874,13 @@ def get_news(stock_ticker, date_range, historical=False):
 
 def get_score(news, vocab, model, max_seq_length):
     """Computes for the average score of a set of news headlines.
+
     Args:
         news (list): A list of news headlines to be scored.
         vocab (dict): A dictionary with words as keys and their integer equivalent as values.
         model (keras.Sequential): The best performing sentiment model to be used for scoring.
         max_seq_length (int): The length of the longest sentence during model building.
+
     Returns:
         np.float32: The average score.
     """
@@ -876,9 +907,11 @@ def get_score(news, vocab, model, max_seq_length):
 
 def get_sentimental_data (stock_ticker, date_range):
     """Computes and/or access sentimental data for a specific stock. To be used for model training.
+
     Args:
         stock_ticker (str): The stock ticker being examined (e.g., BPI).
         date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+
     Returns:
         pd.Dataframe: Dataframe representing the sentiment indicators.
     """
@@ -895,6 +928,7 @@ def get_sentimental_data (stock_ticker, date_range):
     max_seq_length = 50
     # load vocab constructed during model building
     vocab = load_json_to_dict("sentiment data/vocab.json")
+    
     # load the best performing model in terms of accuracy
     if os.path.exists("best sentiment model"):
         shutil.rmtree("best sentiment model")
@@ -910,15 +944,18 @@ def get_sentimental_data (stock_ticker, date_range):
 
     # for when a file containing sentiment scores for a given stock is already present
     if scores_file.exists():
+
         scores = pd.read_csv(scores_path)
         dates_list = list(scores["date"])
         sentiments_list = list(scores["sentiment"])
+
         # for when the last trading day is within the date range of the scores file 
         if trading_days[-1] <= dates_list[-1]:
             dates = dates_list[dates_list.index(trading_days[0]):dates_list.index(trading_days[-1])+1]
             sentiments = sentiments_list[dates_list.index(trading_days[0]):dates_list.index(trading_days[-1])+1]
 
             return pd.DataFrame({"date": dates, "sentiment": sentiments})
+
         # access additional news data through an API call up to 1 month old
         else:
             more_news_data = get_news(stock_ticker, (dates_list[-1], date_range[1]), historical=False)
@@ -1016,6 +1053,7 @@ def get_sentimental_data (stock_ticker, date_range):
         return data
 #get_sentimental_data END
 
+
 #data_processing START
 def scale_data(data):
     """Scales the data so that there won't be errors with the power transformer
@@ -1052,6 +1090,7 @@ def train_test_split(data, time_steps):
     Returns:
         pd.DataFrame, pd.DataFrame: The train and test datasets.
     """	
+
     test_len = len(data) * 2 // 10
     train, test = data[:-test_len], data[-test_len - time_steps:]
     return train, test
@@ -1068,6 +1107,7 @@ def transform_data(train, test):
     Returns:
         Yeo-Johnson transformed train and test datasets.
     """
+
     # store column names
     col_names = list(train.columns)
     col_num = train.shape[1]
@@ -1115,6 +1155,7 @@ def inverse_transform_data(data, scaler, col_names, feature="stock_return"):
     Returns:
         np.array: The array representing the unscaled data.
     """    
+
     unscaled_data = pd.DataFrame(np.zeros((len(data), len(col_names))), columns=col_names)
     unscaled_data[feature] = data
     unscaled_data = pd.DataFrame(scaler.inverse_transform(unscaled_data), columns=col_names)
@@ -1137,6 +1178,7 @@ def data_processing(technical_data, fundamental_data, sentimental_data, drop_col
         test, pd.DataFrame: The processed test dataset.
         col_names, list: List of column names in the train and test datasets
     """	
+
     data = technical_data.join(fundamental_data.set_index('date'), on='date')
     data = data.join(sentimental_data.set_index('date'), on='date')
     data.dropna(inplace=True)
@@ -1183,6 +1225,7 @@ def make_data_window(train, test, time_steps=1):
     Returns:
         pd.DataFrame (4): The train_x, train_y, test_x, and test_y datasets.
     """	
+
     # get the column index of stock returns in the dataframe
     stock_returns_index = train.columns.get_loc("stock_return")
 
@@ -1291,7 +1334,6 @@ def get_dataset(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     return linear_scaler, scaler, col_names, train_x, train_y, test_x, test_y
 
 
-
 def get_final_window(stock_ticker, date_range=None, time_steps=1, drop_col=None):
     """Returns the final window array representing the model input features to get the next
     trading day direction forecast.
@@ -1377,7 +1419,6 @@ def get_final_window(stock_ticker, date_range=None, time_steps=1, drop_col=None)
     return final_window
 
 
-
 def scale_transform_window(window, linear_scaler, scaler, col_names):
     """Scales and power transforms a window of values based on a previously used scalers.
 
@@ -1390,7 +1431,6 @@ def scale_transform_window(window, linear_scaler, scaler, col_names):
     Returns:
         np.array: The scaled and transformed window.
     """
-    
 
     window = np.reshape(window.copy(), window.shape[1:])
 
@@ -1413,7 +1453,6 @@ def scale_transform_window(window, linear_scaler, scaler, col_names):
     return window
 
 
-
 def get_transformed_final_window(stock_ticker, model_dict):
     """Returns the scaled and transformed final window array representing the 
     model input features to get the next trading day direction forecast.
@@ -1426,7 +1465,6 @@ def get_transformed_final_window(stock_ticker, model_dict):
     Returns:
         np.array: Array representing the scaled and transformed final window of model input features.
     """
-
 
     linear_scaler = model_dict['linear_scaler']
     scaler = model_dict['scaler']
@@ -1447,7 +1485,6 @@ def get_transformed_final_window(stock_ticker, model_dict):
     final_window = scale_transform_window(final_window, linear_scaler, scaler, col_names)
 
     return final_window, last_observed_trading_day
-
 
 
 def main():

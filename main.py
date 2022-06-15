@@ -1,15 +1,12 @@
 from tensorflow import keras, compat
 from statistics import mean, stdev
-import numpy as np
-import pandas as pd
-from sklearn.preprocessing import PowerTransformer
 from data_processing import get_dataset, get_dates_five_years, get_trading_dates, get_transformed_final_window
 from direction_forecasting import experiment, make_model_forecast, get_params_tuned
 from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtGui
 from PyQt5.QtCore import QThread
 from mainwindow import Ui_MainWindow
-import os, sys, math, copy, shutil, shelve, warnings, json, datetime, ctypes
+import os, sys, shelve, warnings, json, datetime, ctypes
 
 
 class PredictionThread(QThread):
@@ -136,7 +133,7 @@ class MainWindow(qtw.QMainWindow):
 
 
     def get_params(self, stock_ticker):
-        """Returns model parameters (hyperparams, features, etc.) gotten
+        """Returns model parameters (hyperparams, features, etc.) retrived
         from the params database.
 
         Args:
@@ -177,11 +174,11 @@ class MainWindow(qtw.QMainWindow):
         gotten from the model_info database.
 
         Args:
-            stock_ticker (_type_): _description_
-            last_model_tuning_date (_type_): _description_
+            stock_ticker (str): The stock whose model info is needed.
+            last_model_tuning_date (str): The date when the model was last tuned.
 
         Returns:
-            _type_: _description_
+            dict: A dictionary representing model info.
         """
 
         os.chdir('data')
@@ -298,7 +295,7 @@ class MainWindow(qtw.QMainWindow):
 
     def make_prediction(self):
         """Called whenever the Predict button in the application UI is clicked.
-        The application will creates/retrieve models based on user-inputted stock
+        The application will create/retrieve models based on user-inputted stock
         to make a next trading day direction forecast.
         """
 
@@ -459,6 +456,10 @@ class MainWindow(qtw.QMainWindow):
 
 
     def clear_model_info(self):
+        """Resets model information shown in the Models tab
+        of the application.
+        """   
+
         self.ui.last_tuning_date_label2.setText('-')
         self.ui.layers_label.setText('-')
         self.ui.units_label.setText('-')
@@ -466,7 +467,15 @@ class MainWindow(qtw.QMainWindow):
         self.ui.window_size_label.setText('-')
 
 
-    def update_model_info(self, time_steps=1, hps=None, last_model_tuning_date='Never'):
+    def update_model_info(self, time_steps, hps, last_model_tuning_date):
+        """Displays model information in the Models tab of the application.
+
+        Args:
+            time_steps (int): The number of timesteps.
+            hps (dict): A dictionary representing model hyperparameters.
+            last_model_tuning_date (str): The date when the model was last tuned.
+        """
+
         self.clear_model_info()
         
         if last_model_tuning_date == 'Never':
@@ -491,6 +500,10 @@ class MainWindow(qtw.QMainWindow):
 
 
     def get_model(self):
+        """Called whenever the Get Model button in the application UI is clicked.
+        The application will retrieve relevant model information on user-inputted stock from the params database.
+        If stock is not in the params database, will display default hyperparameters instead.
+        """
 
         self.disable_ui()
         self.clear_model_info()
@@ -516,13 +529,14 @@ class MainWindow(qtw.QMainWindow):
             self.ui.status_label1.setText(f'Getting model information for {stock_ticker}...')
             self.ui.status_label2.setText(f'Getting model information for {stock_ticker}...')
 
+            # get model parameters from database
             params = self.get_params(stock_ticker)
             
             time_steps = params['time_steps']
             hps = params['hps']
             last_model_tuning_date = params['last_model_tuning_date']
 
-            self.update_model_info(time_steps=time_steps, hps=hps, last_model_tuning_date=last_model_tuning_date)
+            self.update_model_info(time_steps, hps, last_model_tuning_date)
 
             self.ui.status_label1.setText(f'Idle - Model information for {stock_ticker} displayed')
             self.ui.status_label2.setText(f'Idle - Model information for {stock_ticker} displayed')
@@ -535,6 +549,11 @@ class MainWindow(qtw.QMainWindow):
 
 
     def tune_model(self):
+        """Called whenever the Tune Model button in the application UI is clicked.
+        The application will perform feature selection and hyperparameter tuning 
+        to obtain the best possible set of parameters for the user-inputted stock.
+        This will then be saved into the params database for future use.
+        """
         
         self.disable_ui()
         self.clear_model_info()
@@ -555,10 +574,12 @@ class MainWindow(qtw.QMainWindow):
             self.ui.status_label2.setText('Please see console for possible confirmation')
             
             date_range = get_dates_five_years()
-            params = self.get_params(stock_ticker)
 
+            # get model parameters from database
+            params = self.get_params(stock_ticker)
             last_model_tuning_date = params['last_model_tuning_date']
 
+            # skips model tuning if current date is the same is the last tuning data of the model
             if (last_model_tuning_date == 'Never') or (date_range[1] != last_model_tuning_date):
                 _, _, _, train_x, train_y, _, _ = get_dataset(stock_ticker, date_range=date_range, time_steps=1, drop_col=None)
 
@@ -572,6 +593,8 @@ class MainWindow(qtw.QMainWindow):
                 self.ui.status_label1.setText(f'Tuning model for {stock_ticker}...')
                 self.ui.status_label2.setText(f'Tuning model for {stock_ticker}...')
 
+                # get optimal model parameters
+                # includes feature selection and hyperparameter tuning
                 tuned_params = get_params_tuned(stock_ticker, date_range)
 
                 os.chdir('data')
@@ -579,6 +602,7 @@ class MainWindow(qtw.QMainWindow):
                 params_database = shelve.open('params_database')
                 params_database_key = f"{stock_ticker}"
 
+                # update params database, remove old information if present
                 if params_database_key in params_database:
                     params_database.pop(params_database_key)
 
@@ -603,7 +627,7 @@ class MainWindow(qtw.QMainWindow):
             hps = params['hps']
             last_model_tuning_date = params['last_model_tuning_date']
 
-            self.update_model_info(time_steps=time_steps, hps=hps, last_model_tuning_date=last_model_tuning_date)
+            self.update_model_info(time_steps, hps, last_model_tuning_date)
 
             self.ui.status_label1.setText(f'Idle - Done tuning model for {stock_ticker}')
             self.ui.status_label2.setText(f'Idle - Done tuning model for {stock_ticker}')
