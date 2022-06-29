@@ -1,3 +1,4 @@
+# Modified version of original application; predicts 5-period EMA 5 days into the future instead of daily stock returns
 from tensorflow import keras, compat
 from statistics import mean, stdev
 from data_processing import get_dataset, get_dates_five_years, get_trading_dates, get_transformed_final_window

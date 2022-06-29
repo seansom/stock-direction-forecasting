@@ -73,7 +73,67 @@ def get_trading_dates(stock_ticker, date_range, token):
     return trading_dates
 
 
-def get_technical_indicators(data):
+def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, date_range):
+    """Gets daily technical indicator data from EOD API.
+
+    Args:
+        indicator (str): The indicator for use in EOD API calls. (e.g., rsi)
+        period (str): The period used in computing the technical indicator.
+        token (str): The EOD API key or token.
+        stock_ticker (str): The stock ticker being examined (e.g., BPI).
+        exchange (str): The stock exchange where the stock is being traded (e.g., PSE)
+        date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
+
+    Raises:
+        Exception: Raises exception whenever gathered indicator data is insufficient to cover the specified
+        date range. This may be fixed by increasing the timedelta used in computing the adjusted_first_day variable
+        within the function.
+
+    Returns:
+        pd.Dataframe: Dataframe containing dates and specified technical indicator data
+    """
+
+    # compute an adjusted from or start date for the API
+    first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
+    adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
+    
+    if indicator != 'macd':
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
+    # use (4, 22, 3) period for MACD indicator
+    else:
+        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
+
+    response = requests_get(url)
+    data = response.json()
+
+    # convert to pd.dataframe
+    data = pd.json_normalize(data)
+
+    # remove rows with dates earlier than wanted from date
+    for index, row in data.iterrows():
+
+        # date of current row entry
+        curr_date = datetime.datetime.strptime(row['date'],'%Y-%m-%d')
+
+        # remove unneeded earlier row entries
+        if curr_date < first_trading_day_datetime:
+            data.drop(index, inplace=True)
+
+        else:
+            break
+
+    # reset indices after dropping rows
+    data = data.reset_index(drop=True)
+
+    # raise an exception if the data from EOD API is insufficient to cover the date range specified
+    # this error may be fixed by increasing timedelta used in computing adjusted_first_day
+    if data['date'][0] != date_range[0]:
+        raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
+
+    return data
+
+
+def get_technical_indicators(data, stock_ticker):
     """Computes for log stock returns and technical indicators unavailable to EOD (e.g., A/D, CMF, WR).
 
     Args:
@@ -84,20 +144,21 @@ def get_technical_indicators(data):
     """    
 
     # get closing prices and volume from data
-    try:
-        close = data['adjusted_close']
-    except KeyError:
-        close = data['close']
+    # get API key/token from txt file
+    with open('keys/EOD_API_key.txt') as file:
+        token = file.readline()
 
+    close = get_technical_indicator_from_EOD('ema', 5, token, stock_ticker, 'PSE', (data['date'].iloc[0], data['date'].iloc[-1]))['ema']
     data_len = len(close)
 
     # compute log stock returns
-    stock_returns = [np.NaN]
-    for i in range(1, data_len):
+    shift_days = 5
+    stock_returns = [np.NaN] * shift_days
+    for i in range(shift_days, data_len):
         try:
-            stock_return = math.log(Decimal((close[i])) / Decimal((close[i - 1])))
+            stock_return = math.log(Decimal((close[i])) / Decimal((close[i - shift_days])))
         except TypeError:
-            stock_return = math.log(Decimal(float(close[i])) / Decimal(float(close[i - 1])))
+            stock_return = math.log(Decimal(float(close[i])) / Decimal(float(close[i - shift_days])))
 
         stock_returns.append(stock_return)
 
@@ -180,65 +241,6 @@ def get_technical_indicators(data):
     return technical_indicators
 
 
-def get_technical_indicator_from_EOD(indicator, period, token, stock_ticker, exchange, date_range):
-    """Gets daily technical indicator data from EOD API.
-
-    Args:
-        indicator (str): The indicator for use in EOD API calls. (e.g., rsi)
-        period (str): The period used in computing the technical indicator.
-        token (str): The EOD API key or token.
-        stock_ticker (str): The stock ticker being examined (e.g., BPI).
-        exchange (str): The stock exchange where the stock is being traded (e.g., PSE)
-        date_range (tuple): A tuple of strings indicating the start and end dates for the requested data.
-
-    Raises:
-        Exception: Raises exception whenever gathered indicator data is insufficient to cover the specified
-        date range. This may be fixed by increasing the timedelta used in computing the adjusted_first_day variable
-        within the function.
-
-    Returns:
-        pd.Dataframe: Dataframe containing dates and specified technical indicator data
-    """
-
-    # compute an adjusted from or start date for the API
-    first_trading_day_datetime = datetime.datetime.strptime(date_range[0],'%Y-%m-%d')
-    adjusted_first_day = ((first_trading_day_datetime) - datetime.timedelta(days=100)).strftime('%Y-%m-%d')
-    
-    if indicator != 'macd':
-        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&period={period}&api_token={token}"
-    # use (4, 22, 3) period for MACD indicator
-    else:
-        url = f"https://eodhistoricaldata.com/api/technical/{stock_ticker}.{exchange}?order=a&fmt=json&from={adjusted_first_day}&to={date_range[1]}&function={indicator}&fast_period=4&slow_period=22&signal_period=3&api_token={token}"
-
-    response = requests_get(url)
-    data = response.json()
-
-    # convert to pd.dataframe
-    data = pd.json_normalize(data)
-
-    # remove rows with dates earlier than wanted from date
-    for index, row in data.iterrows():
-
-        # date of current row entry
-        curr_date = datetime.datetime.strptime(row['date'],'%Y-%m-%d')
-
-        # remove unneeded earlier row entries
-        if curr_date < first_trading_day_datetime:
-            data.drop(index, inplace=True)
-
-        else:
-            break
-
-    # reset indices after dropping rows
-    data = data.reset_index(drop=True)
-
-    # raise an exception if the data from EOD API is insufficient to cover the date range specified
-    # this error may be fixed by increasing timedelta used in computing adjusted_first_day
-    if data['date'][0] != date_range[0]:
-        raise Exception(f'Error getting {indicator} indicator for {stock_ticker}.')
-
-    return data
-
 
 def get_technical_data(stock_ticker, date_range):
     """Computes and gets technical dataset for a specific stock. To be used for model training.
@@ -281,7 +283,7 @@ def get_technical_data(stock_ticker, date_range):
     # data["volume"] = data["volume"].apply(lambda x: x)
 
     # compute returns and technical indicators not available on EOD
-    technical_indicators = get_technical_indicators(data)
+    technical_indicators = get_technical_indicators(data, stock_ticker)
     data = data.merge(technical_indicators, on='date')
 
     # remove rows with dates earlier than wanted from date
@@ -1240,17 +1242,18 @@ def make_data_window(train, test, time_steps=1):
     # y values: actual future values to be predicted from data window
     train_x, train_y, test_x, test_y = [], [], [], []
 
+    shift_days = 5
     for i in range(train_len):
 
-        if (i + time_steps) < train_len:
+        if (i + time_steps + (shift_days - 1)) < train_len:
             train_x.append([train[j, :] for j in range(i, i + time_steps)])
-            train_y.append([train[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+            train_y.append([train[j, stock_returns_index] for j in range(i + shift_days, i + time_steps + shift_days)])
             
     for i in range(test_len):
         
-        if (i + time_steps) < test_len:
+        if (i + time_steps + (shift_days - 1)) < test_len:
             test_x.append([test[j, :] for j in range(i, i + time_steps)])
-            test_y.append([test[j, stock_returns_index] for j in range(i + 1, i + time_steps + 1)])
+            test_y.append([test[j, stock_returns_index] for j in range(i + shift_days, i + time_steps + shift_days)])
 
 
     train_x = np.array(train_x)
