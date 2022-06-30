@@ -148,7 +148,7 @@ def get_technical_indicators(data, stock_ticker):
     with open('keys/EOD_API_key.txt') as file:
         token = file.readline()
 
-    close = get_technical_indicator_from_EOD('ema', 5, token, stock_ticker, 'PSE', (data['date'].iloc[0], data['date'].iloc[-1]))['ema']
+    close = get_technical_indicator_from_EOD('sma', 5, token, stock_ticker, 'PSE', (data['date'].iloc[0], data['date'].iloc[-1]))['sma']
     data_len = len(close)
 
     # compute log stock returns
@@ -161,6 +161,12 @@ def get_technical_indicators(data, stock_ticker):
             stock_return = math.log(Decimal(float(close[i])) / Decimal(float(close[i - shift_days])))
 
         stock_returns.append(stock_return)
+
+    # get closing prices and volume from data
+    try:
+        close = data['adjusted_close']
+    except KeyError:
+        close = data['close']
 
     # compute A/D indicator values
     ad = []
